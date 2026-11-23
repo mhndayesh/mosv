@@ -37,6 +37,7 @@ INPUT_DEPTH = 8
 RESULT_DEPTH = 16
 STREAM_DEPTH = 32
 START_GAP_SECONDS = 3  # Added after the first card has fully loaded.
+WORKER_VRAM_GB = 7.0  # 128 x 176 tokens on 4B peaks at 4.7 GB; the desktop also holds 2.7 GB on the main card.
 STALL_SECONDS = 120
 STATUS_SECONDS = 5
 
@@ -146,6 +147,17 @@ def read_batch(torch, model, batch):
     raise RuntimeError("Read layer was never reached")
 
 
+def keep_layers_through(model, read_layer: int) -> None:
+    """The router stops at its read layer, so later layers would only waste VRAM."""
+    del model.model.layers[read_layer + 1:]
+
+
+def limit_vram(torch) -> None:
+    """Varying batch shapes grow PyTorch's cache; a limit makes it reuse freed blocks before asking for more."""
+    total = torch.cuda.get_device_properties(0).total_memory
+    torch.cuda.set_per_process_memory_fraction(min(1.0, WORKER_VRAM_GB * 1e9 / total), 0)
+
+
 def load_model(torch, spec):
     from transformers import AutoModelForCausalLM
 
@@ -154,7 +166,9 @@ def load_model(torch, spec):
     bus = getattr(torch.cuda.get_device_properties(0), "pci_bus_id", None)
     if bus is not None and bus != spec["bus"]:
         raise RuntimeError(f"Wrong card: bus {bus}, expected {spec['bus']}")
-    model = AutoModelForCausalLM.from_pretrained(MODEL, dtype=torch.float16).to("cuda:0").eval()
+    model = AutoModelForCausalLM.from_pretrained(MODEL, dtype=torch.float16).eval()
+    keep_layers_through(model, READ_LAYER)
+    model.to("cuda:0")
     model.model.layers[READ_LAYER].register_forward_hook(stop_hook)
     return model
 
@@ -166,6 +180,7 @@ def gpu_worker(name, spec, inputs, results, beat, ready, abort) -> None:
     import torch
 
     try:
+        limit_vram(torch)
         model = load_model(torch, PIPELINES[name])
         beat.value = time.time()
         ready.set()

@@ -11,7 +11,9 @@ from router.dataset import (
     FINAL_TEST, OTHER_WRITING, TASK_WORDS, TEMPLATES, UNCLEAR_BUILD, alpaca_label, apply_review, body_fields,
     check_rows, is_clean_none, is_near_miss, make_row, render,
 )
-from router.pipeline import MAX_BODY_TOKENS, check_result, encode, load_audited, plan_batches, save_chunk
+from router.pipeline import (
+    MAX_BODY_TOKENS, check_result, encode, keep_layers_through, load_audited, plan_batches, save_chunk,
+)
 from router.train import decide, false_steer_rate, new_router, pick_threshold, safety, safety_pass
 
 
@@ -44,6 +46,31 @@ class TestPlan(unittest.TestCase):
             for task in plan:
                 for uid, label in zip(task["ids"], task["labels"]):
                     self.assertEqual(CLASSES[label], source[uid]["label"])
+
+
+class TestKeepLayers(unittest.TestCase):
+    def test_router_model_keeps_only_layers_through_the_read_layer(self):
+        import torch
+        from types import SimpleNamespace
+
+        blocks = [torch.nn.Identity() for _ in range(36)]
+        model = SimpleNamespace(model=SimpleNamespace(layers=torch.nn.ModuleList(blocks)))
+        keep_layers_through(model, 9)
+        self.assertEqual(len(model.model.layers), 10)
+        self.assertIs(model.model.layers[9], blocks[9])
+
+
+class TestVramLimit(unittest.TestCase):
+    def test_worker_limit_is_a_share_of_the_real_card(self):
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from router.pipeline import WORKER_VRAM_GB, limit_vram
+
+        cuda = mock.Mock()
+        cuda.get_device_properties.return_value = SimpleNamespace(total_memory=16e9)
+        limit_vram(SimpleNamespace(cuda=cuda))
+        cuda.set_per_process_memory_fraction.assert_called_once_with(WORKER_VRAM_GB / 16, 0)
 
 
 class FakeTokenizer:

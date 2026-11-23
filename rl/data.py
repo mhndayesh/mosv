@@ -29,6 +29,7 @@ def default_out(topics: tuple[str, ...]) -> Path:
     return ROOT / "data_review" / ("rl" if topics == TOPICS_V1 else "rl_v2")
 
 
+ROUTE_BATCH = 128
 BEHAVIORS = resolve_topics(os.environ.get("STEERING_TOPICS"))
 OUT = Path(os.environ.get("STEERING_RL_OUT") or default_out(BEHAVIORS))
 
@@ -99,6 +100,61 @@ def write_routed(topics: tuple[str, ...] = BEHAVIORS, out: Path = OUT, prompts: 
     print(json.dumps({"router_on_main_gpu": counts}), flush=True)
 
 
+def length_batches(texts: list[str], size: int) -> list[list[int]]:
+    """Indexes in batches of similar length, so little padding is computed."""
+    order = sorted(range(len(texts)), key=lambda i: len(texts[i]))
+    return [order[start:start + size] for start in range(0, len(order), size)]
+
+
+def route_texts(torch, texts: list[str], saved: dict) -> list[str]:
+    """Run the real router on any prompts, reading the model on the main GPU."""
+    from transformers import AutoTokenizer
+
+    from router import CLASSES
+    from router.pipeline import MODEL, PIPELINES, chat_parts, encode, limit_vram, load_model, read_batch
+    from router.train import decide
+
+    limit_vram(torch)
+    model = load_model(torch, PIPELINES["main"])
+    tokenizer = AutoTokenizer.from_pretrained(MODEL)
+    before, after, pad = chat_parts(MODEL)
+    router = torch.nn.Linear(saved["mean"].numel(), len(CLASSES)).to("cuda:0")
+    router.load_state_dict(saved["state"])
+    names: list[str | None] = [None] * len(texts)
+    with torch.inference_mode():
+        for part in length_batches(texts, ROUTE_BATCH):
+            batch = encode(tokenizer.backend_tokenizer, [texts[i] for i in part], before, after, pad)
+            features = torch.from_numpy(read_batch(torch, model, batch)).to("cuda:0")
+            logits = router((features - saved["mean"]) / saved["std"])
+            choices = decide((logits / saved["temperature"]).softmax(1).cpu().numpy(), saved["threshold"],
+                             len(CLASSES) - 1)
+            for index, choice in zip(part, choices.tolist()):
+                names[index] = CLASSES[choice]
+    return names
+
+
+def write_routed_all(topics: tuple[str, ...], out: Path, checkpoint: Path) -> None:
+    """Keep every training prompt the router sends to its own topic, and show samples of what it dropped."""
+    os.environ.update(HIP_VISIBLE_DEVICES="1", CUDA_VISIBLE_DEVICES="1")
+    import torch
+
+    rows = {behavior: read_split(behavior, "train", out) for behavior in topics}
+    flat = [(behavior, row) for behavior in topics for row in rows[behavior]]
+    saved = torch.load(checkpoint, map_location="cuda:0", weights_only=True)
+    names = route_texts(torch, [row["prompt"] for _, row in flat], saved)
+    report = {behavior: {"train": len(rows[behavior]), "routed": 0, "dropped_samples": []} for behavior in topics}
+    kept: dict[str, list[dict]] = {behavior: [] for behavior in topics}
+    for (behavior, row), name in zip(flat, names):
+        if name == behavior:
+            kept[behavior].append(row)
+            report[behavior]["routed"] += 1
+        elif len(report[behavior]["dropped_samples"]) < 3:
+            report[behavior]["dropped_samples"].append({"sent_to": name, "prompt": row["prompt"][:110]})
+    for behavior in topics:
+        write_jsonl(out / f"{behavior}_routed.jsonl", kept[behavior])
+    print(json.dumps({"routed": report}, ensure_ascii=False), flush=True)
+
+
 def build(topics: tuple[str, ...], out: Path, source: str, prompts: Path, clean_dir: Path) -> dict:
     """Write `<topic>_<split>.jsonl` for every topic. `source` is `router` or `clean`."""
     out.mkdir(parents=True, exist_ok=True)
@@ -132,7 +188,10 @@ def main(argv: list[str] | None = None) -> None:
     topics = resolve_topics(args.topics)
     out = args.out or default_out(topics)
     if args.route:
-        write_routed(topics, out, args.prompts, args.router_checkpoint)
+        if topics == TOPICS_V1:
+            write_routed(topics, out, args.prompts, args.router_checkpoint)
+        else:
+            write_routed_all(topics, out, args.router_checkpoint)
         return
     source = args.source or ("router" if topics == TOPICS_V1 else "clean")
     print(json.dumps(build(topics, out, source, args.prompts, args.clean_dir), indent=1))
