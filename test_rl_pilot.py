@@ -10,7 +10,7 @@ from unittest import mock
 import torch
 from torch import nn
 
-from rl.data import check_separate, split_rows
+from rl.data import check_separate, length_batches, split_rows
 from rl import pilot
 from rl.pilot import next_expert, parse_list
 from model_profiles import DEFAULT_PROFILE, PROFILES, get_profile, model_width, profile_for_model
@@ -294,6 +294,79 @@ class TestVllmRollouts(unittest.TestCase):
         run, _, _ = vllm_run(max_new=100)
         with self.assertRaisesRegex(ValueError, "exceeds"):
             rollouts(run, [{"prompt": "a" * (MAX_MODEL_LEN - 99)}])
+
+
+class TestCardMemoryBudgets(unittest.TestCase):
+    def test_4b_stays_under_the_stop_on_each_card(self):
+        profile = PROFILES["qwen4b"]
+        for card in ("main", "second"):
+            self.assertLess(profile.torch_vram_gb[card] + profile.other_vram_gb[card], profile.hard_stop_gb)
+        self.assertLess(profile.cells("main"), profile.cells("second"))
+
+    def test_06b_keeps_its_old_budget(self):
+        profile = PROFILES["qwen06b"]
+        self.assertEqual((profile.cells("main"), profile.eval_batch, dict(profile.torch_vram_gb)), (22000, 32, {}))
+
+    def test_limit_is_a_share_of_the_real_card(self):
+        cuda = mock.Mock()
+        cuda.get_device_properties.return_value = SimpleNamespace(total_memory=16e9)
+        pilot.limit_torch_vram(SimpleNamespace(cuda=cuda), PROFILES["qwen4b"], "main")
+        cuda.set_per_process_memory_fraction.assert_called_once_with(11.0 / 16, 0)
+
+    def test_free_gpu_collects_cycles_before_emptying_the_cache(self):
+        order = []
+        fake = SimpleNamespace(cuda=SimpleNamespace(empty_cache=lambda: order.append("empty")))
+        with mock.patch.object(pilot.gc, "collect", lambda: order.append("collect")):
+            pilot.free_gpu(fake)
+        self.assertEqual(order, ["collect", "empty"])
+
+    def test_no_budget_sets_no_limit(self):
+        cuda = mock.Mock()
+        pilot.limit_torch_vram(SimpleNamespace(cuda=cuda), PROFILES["qwen06b"], "main")
+        cuda.set_per_process_memory_fraction.assert_not_called()
+
+
+class TestSeparateCards(unittest.TestCase):
+    def test_engine_starts_on_main_card_and_learner_keeps_second(self):
+        seen, pins = {}, []
+
+        def fake_start(*_args, around_build, card, swap, **_kwargs):
+            seen.update(card=card, swap=swap)
+            around_build(lambda: seen.update(engine_card=os.environ["HIP_VISIBLE_DEVICES"]))
+            return "engine"
+
+        cuda = SimpleNamespace(get_device_properties=lambda _i: SimpleNamespace(total_memory=16e9))
+        fake_torch = SimpleNamespace(cuda=cuda, set_num_threads=lambda _n: None)
+        args = SimpleNamespace(group=4, max_new=256, kv_cache_dtype="auto", vllm_swap="separate")
+        with mock.patch.dict(os.environ, {"HIP_VISIBLE_DEVICES": "0", "CUDA_VISIBLE_DEVICES": "0"}), \
+                mock.patch.object(pilot, "pin_process", pins.append), \
+                mock.patch.object(pilot.VllmSampler, "start", fake_start):
+            self.assertEqual(pilot.start_sampler("second", args, {EOS}, fake_torch, PROFILES["qwen4b"]), "engine")
+            self.assertEqual(os.environ["HIP_VISIBLE_DEVICES"], "0")
+        self.assertEqual(seen, {"card": "main", "swap": "separate", "engine_card": "1"})
+        self.assertEqual(pins[0], pilot.ENGINE_CPUS["main"])
+        self.assertEqual(pins[1], sorted(pilot.PIPELINES["second"]["build"] + pilot.PIPELINES["second"]["gpu"]))
+        self.assertFalse(set(pins[0]) & set(pins[1]))
+
+    def test_separate_mode_never_enables_sleep(self):
+        settings = engine_settings(PROFILES["qwen4b"], "main", int(16e9), "separate")
+        self.assertNotIn("enable_sleep_mode", settings)
+
+    def test_separate_mode_needs_vllm_on_the_second_card(self):
+        good = SimpleNamespace(vllm_swap="separate", sampler="vllm", cards="second")
+        pilot.check_separate_cards(good)
+        for bad in (SimpleNamespace(vllm_swap="separate", sampler="hf", cards="second"),
+                    SimpleNamespace(vllm_swap="separate", sampler="vllm", cards="main,second")):
+            with self.assertRaises(ValueError):
+                pilot.check_separate_cards(bad)
+
+
+class TestRouteBatches(unittest.TestCase):
+    def test_every_prompt_is_routed_once_in_similar_lengths(self):
+        texts = ["a" * n for n in (9, 1, 5, 3, 7)]
+        batches = length_batches(texts, 2)
+        self.assertEqual(batches, [[1, 3], [2, 4], [0]])
+        self.assertEqual(sorted(i for part in batches for i in part), list(range(5)))
 
 
 class TestCardCpus(unittest.TestCase):

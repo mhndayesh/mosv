@@ -27,7 +27,7 @@ from rl.policy import trim_completion
 PLUGIN_DIR = Path(__file__).parent / "vllm_plugin"
 MAX_MODEL_LEN = 1024  # Prompt plus answer must fit in this.
 SLEEP_LEVEL = 1  # Level 2 would reread 8 GB through the slow /mnt/c path on every wake.
-SWAP_MODES = ("sleep", "restart")
+SWAP_MODES = ("sleep", "restart", "separate")  # separate: vLLM on the main card, PyTorch on the second.
 ENV_DEFAULTS = {
     "ROCPROFILER_REGISTER_ENABLED": "0",
     "VLLM_WSL2_ENABLE_PIN_MEMORY": "1",

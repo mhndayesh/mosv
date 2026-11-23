@@ -8,6 +8,7 @@ Progress is saved after each update, so a stopped run resumes.
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import math
 import multiprocessing as mp
@@ -46,6 +47,7 @@ MAX_GRAD_NORM = 1.0
 START_GAP_SECONDS = 3
 SEED = 2026
 ENGINE_STOP_SECONDS = 10
+CARD_VARS = ("HIP_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES")
 # vLLM used about 2x PyTorch's CPU in the retrain, so it gets the P-core threads and PyTorch the card's E-cores.
 ENGINE_CPUS = {"main": [0, 1, 2, 3, 4, 5], "second": [6, 7, 8, 9, 10, 11]}
 
@@ -121,14 +123,21 @@ def activation_norms(run: Run, rows: list[dict]):
     return torch.tensor(average, device="cuda:0"), torch.tensor(typical, device="cuda:0")
 
 
+def free_gpu(torch) -> None:
+    """A finished generation's KV cache sits in reference cycles, so collect it before emptying the cache."""
+    gc.collect()
+    torch.cuda.empty_cache()
+
+
 def eval_answers_hf(run: Run, bank, choice, rows: list[dict]) -> list[list[int]]:
     run.turns.for_torch()
     answers = []
-    for start in range(0, len(rows), EVAL_BATCH):
-        ids, mask = encode(run, [row["prompt"] for row in rows[start:start + EVAL_BATCH]])
+    size = run.profile.eval_batch
+    for start in range(0, len(rows), size):
+        ids, mask = encode(run, [row["prompt"] for row in rows[start:start + size]])
         with bank.choose(choice):
             answers += generate(run, ids, mask, sample=False)
-        run.torch.cuda.empty_cache()
+        free_gpu(run.torch)
     return answers
 
 
@@ -162,7 +171,7 @@ def generation_chunks(run: Run, rows: list[dict]) -> list[list[int]]:
     """Long prompts use more cache memory, so they go in smaller batches."""
     encoded = run.tokenizer([row["prompt"] for row in rows], add_special_tokens=False)["input_ids"]
     lengths = [len(tokens) + CHAT_TOKENS + run.args.max_new for tokens in encoded]
-    return token_chunks(list(range(len(rows))), lengths, run.profile.generate_cells // run.args.group)
+    return token_chunks(list(range(len(rows))), lengths, run.profile.cells(run.card) // run.args.group)
 
 
 def add_group(run: Run, expert: str, row: dict, prompt: list[int], answers: list[list[int]], out: tuple) -> None:
@@ -180,7 +189,7 @@ def sample_rollouts_hf(run: Run, bank, rows: list[dict], expert: str) -> tuple:
         ids, mask = encode(run, [row["prompt"] for row in chunk])
         with bank.choose(0):
             made = generate(run, ids, mask, sample=True, copies=group)
-        run.torch.cuda.empty_cache()
+        free_gpu(run.torch)
         for index, row in enumerate(chunk):
             add_group(run, expert, row, ids[index][mask[index].bool()].tolist(),
                       made[index * group:(index + 1) * group], out)
@@ -257,7 +266,7 @@ def policy_step(run: Run, bank, optimizer, caps, rows: list[dict], expert: str, 
     prompts, completions, rewards, advantages = sample_rollouts(run, bank, rows, expert)
     generate_seconds = time.time() - started
     generate_peak = torch.cuda.max_memory_allocated() / 1e9
-    torch.cuda.empty_cache()
+    free_gpu(torch)
     torch.cuda.reset_peak_memory_stats()
     run.turns.for_torch()  # Before the timer, so gradient_s and swap_s do not overlap.
     optimizer.zero_grad(set_to_none=True)
@@ -414,33 +423,48 @@ def pin_process(cpus: list[int]) -> None:
 
 
 def start_sampler(name: str, args, eos: set, torch, profile: ModelProfile):
-    """vLLM inherits the engine CPUs each time it starts; this process then moves to the learner CPUs."""
-    cpus = learner_cpus(name)
+    """vLLM inherits its card and CPUs when it starts; this process then moves to the learner CPUs."""
+    separate = args.vllm_swap == "separate"
+    engine_card = "main" if separate else name
+    cpus = sorted(PIPELINES[name]["build"] + PIPELINES[name]["gpu"]) if separate else learner_cpus(name)
 
     def on_engine_cpus(make):
-        pin_process(ENGINE_CPUS[name])
+        pin_process(ENGINE_CPUS[engine_card])
+        saved = {key: os.environ.get(key) for key in CARD_VARS}
+        os.environ.update(dict.fromkeys(CARD_VARS, PIPELINES[engine_card]["card"]))
         try:
             return make()
         finally:
+            for key, value in saved.items():
+                os.environ.pop(key, None) if value is None else os.environ.__setitem__(key, value)
             pin_process(cpus)
             torch.set_num_threads(len(cpus))
 
     total = torch.cuda.get_device_properties(0).total_memory if profile.vllm_memory_gb else None
     return VllmSampler.start(profile.path, args.group, args.max_new, eos, args.kv_cache_dtype, profile=profile,
-                             card=name, total_bytes=total, swap=args.vllm_swap, around_build=on_engine_cpus)
+                             card=engine_card, total_bytes=total, swap=args.vllm_swap, around_build=on_engine_cpus)
+
+
+def limit_torch_vram(torch, profile: ModelProfile, card: str) -> None:
+    """Keep PyTorch's cache under this card's budget, so it reuses freed blocks instead of growing."""
+    limit = profile.torch_vram_gb.get(card)
+    if limit:
+        total = torch.cuda.get_device_properties(0).total_memory
+        torch.cuda.set_per_process_memory_fraction(min(1.0, limit * 1e9 / total), 0)
 
 
 def load_learner(torch, args, profile: ModelProfile, sampler):
     """Returns the frozen PyTorch model and who holds the card."""
     from transformers import AutoModelForCausalLM
 
-    if profile.time_share and sampler is not None and args.dtype != "float16":
+    take_turns = profile.time_share and sampler is not None and args.vllm_swap != "separate"
+    if take_turns and args.dtype != "float16":
         raise ValueError("Turn-taking needs float16; float32 weights would not leave room for gradients")
     model = AutoModelForCausalLM.from_pretrained(profile.path, dtype=getattr(torch, args.dtype)).eval()
     for weight in model.parameters():
         weight.requires_grad_(False)
     turns = NoTurns()
-    if profile.time_share and sampler is not None:
+    if take_turns:
         shuttle = WeightShuttle(model, open_weight_views(profile.path), torch.float16, "cuda:0")
         shuttle.to_cpu()  # Drops the private RAM copy that from_pretrained made.
         turns = CardTurns(torch, sampler, shuttle)
@@ -483,6 +507,7 @@ def worker(name: str, experts, args, ready) -> None:
     eos = {tokenizer.eos_token_id, tokenizer.convert_tokens_to_ids("<|endoftext|>")}
     # vLLM goes first so it takes its share of the card before the PyTorch model and gradient batches.
     sampler = start_sampler(name, args, eos, torch, profile) if args.sampler == "vllm" else None
+    limit_torch_vram(torch, profile, name)
     model, turns = load_learner(torch, args, profile, sampler)
     run = Run(torch, model, tokenizer, eos, tokenizer.pad_token_id, args, name, profile, sampler, turns)
     ready.set()
@@ -541,8 +566,15 @@ def make_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def check_separate_cards(args) -> None:
+    """In separate mode one learner on the second card drives the vLLM engine on the main card."""
+    if args.vllm_swap == "separate" and (args.sampler != "vllm" or args.cards != "second"):
+        raise ValueError("--vllm-swap separate needs --sampler vllm and --cards second")
+
+
 def main() -> int:
     args = make_parser().parse_args()
+    check_separate_cards(args)
     context = mp.get_context("spawn")
     processes = []
     experts = context.Queue()

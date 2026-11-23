@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
@@ -40,6 +40,12 @@ class ModelProfile:
     gradient_checkpointing: bool
     other_vram_gb: Mapping[str, float]  # VRAM other programs hold on each card.
     hard_stop_gb: float | None  # Stop the run above this much VRAM on a card.
+    torch_vram_gb: Mapping[str, float] = field(default_factory=dict)  # PyTorch's own limit per card.
+    generate_cells_by_card: Mapping[str, int] = field(default_factory=dict)  # Overrides generate_cells.
+    eval_batch: int = 32  # Prompts per scoring batch with Hugging Face generation.
+
+    def cells(self, card: str) -> int:
+        return self.generate_cells_by_card.get(card, self.generate_cells)
 
     @property
     def router_folder(self) -> Path:
@@ -88,6 +94,9 @@ PROFILES = {
         gradient_tokens_alone={"main": 4000, "second": 8000},
         generate_cells=12000, head_chunk=256, gradient_checkpointing=True,
         other_vram_gb={"main": 2.7, "second": 0.0}, hard_stop_gb=14.0,
+        # One 4B copy per card. With these PyTorch limits, 8,000 (main) and 12,000 (second) cells ran out of memory.
+        torch_vram_gb={"main": 11.0, "second": 13.5}, generate_cells_by_card={"main": 5000, "second": 8000},
+        eval_batch=16,
     ),
 }
 
