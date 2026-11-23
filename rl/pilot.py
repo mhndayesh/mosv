@@ -93,14 +93,20 @@ def decode(run: Run, tokens: list[int]) -> str:
     return run.tokenizer.decode(tokens, skip_special_tokens=True).strip()
 
 
+def layer_sizes(tensor, mask) -> tuple[float, float]:
+    """Average and typical (median) token size. Qwen's first token is ~8,200, which inflates only the average."""
+    sizes = tensor[mask.bool()].float().norm(dim=-1)
+    return sizes.mean().item(), sizes.median().item()
+
+
 def activation_norms(run: Run, rows: list[dict]):
+    """Returns (average, typical) per layer: the average sets the step size, the typical size sets the cap."""
     torch, totals, handles = run.torch, {}, []
     ids, mask = encode(run, [row["prompt"] for row in rows[:EVAL_BATCH]])
 
     def capture(slot):
         def hook(_module, _inputs, output):
-            tensor = output[0] if isinstance(output, tuple) else output
-            totals[slot] = tensor[mask.bool()].float().norm(dim=-1).mean().item()
+            totals[slot] = layer_sizes(output[0] if isinstance(output, tuple) else output, mask)
         return hook
 
     for slot, layer in enumerate(LAYERS):
@@ -109,7 +115,8 @@ def activation_norms(run: Run, rows: list[dict]):
         run.model.model(input_ids=ids, attention_mask=mask, use_cache=False)
     for handle in handles:
         handle.remove()
-    return torch.tensor([totals[slot] for slot in range(len(LAYERS))], device="cuda:0")
+    average, typical = zip(*(totals[slot] for slot in range(len(LAYERS))))
+    return torch.tensor(average, device="cuda:0"), torch.tensor(typical, device="cuda:0")
 
 
 def eval_answers_hf(run: Run, bank, choice, rows: list[dict]) -> list[list[int]]:
@@ -298,6 +305,18 @@ def save_atomic(torch, state: dict, path: Path) -> None:
     os.replace(temp, path)
 
 
+def vector_state(bank, optimizer, step: int, expert: str, **extra) -> dict:
+    return {"bank": {"vectors.0": bank.vectors[0].detach().cpu()}, "optimizer": optimizer.state_dict(),
+            "step": step, "expert": expert, "layers": list(LAYERS), **extra}
+
+
+def save_best(run: Run, bank, best_vector, optimizer, step: int, best_step: int, expert: str, path: Path) -> None:
+    """The finished file must hold the best dev vector, because inference loads this file."""
+    with run.torch.no_grad():
+        bank.vectors[0].copy_(best_vector)
+    save_atomic(run.torch, vector_state(bank, optimizer, step, expert, best_step=best_step), path)
+
+
 def train_expert(run: Run, expert: str) -> dict:
     from steering import SteeringBank
 
@@ -311,8 +330,8 @@ def train_expert(run: Run, expert: str) -> dict:
     dev, test = dev[:args.dev], test[:args.test]
     bank = SteeringBank([expert], LAYERS, WIDTH).to("cuda:0")
     bank.attach(run.model)
-    norms = activation_norms(run, train)
-    caps = norms * args.cap_fraction
+    norms, typical = activation_norms(run, train)
+    caps = typical * args.cap_fraction
     optimizer = make_optimizer(run, bank.vectors[0], norms)
     path, step, history = folder / f"{expert}.pt", 0, []
     if path.exists() and not args.fresh:
@@ -322,7 +341,8 @@ def train_expert(run: Run, expert: str) -> dict:
         step = state["step"]
     say(run.card, expert=expert, start_step=step, optimizer=args.optimizer, sampler=args.sampler,
         eval_engine=args.sampler,
-        activation_norms=[round(float(v), 2) for v in norms], caps=[round(float(v), 2) for v in caps],
+        activation_norms=[round(float(v), 2) for v in norms], typical_norms=[round(float(v), 2) for v in typical],
+        caps=[round(float(v), 2) for v in caps],
         prompts={"train": len(train), "dev": len(dev), "test": len(test)})
     base_dev = evaluate(run, bank, None, dev, expert)
     say(run.card, expert=expert, dev_base=base_dev["score"], degenerate=base_dev["degenerate"])
@@ -333,8 +353,7 @@ def train_expert(run: Run, expert: str) -> dict:
         rows = [train[(step * args.prompts + i) % len(train)] for i in range(args.prompts)]
         info = policy_step(run, bank, optimizer, caps, rows, expert, probe)
         step += 1
-        save_atomic(torch, {"bank": {"vectors.0": bank.vectors[0].detach().cpu()}, "optimizer": optimizer.state_dict(),
-                            "step": step, "expert": expert, "layers": list(LAYERS)}, path)
+        save_atomic(torch, vector_state(bank, optimizer, step, expert), path)
         say(run.card, expert=expert, step=step, **info, seconds=round(time.time() - started, 1))
         if step % args.eval_every == 0 or step == args.updates:
             result = evaluate(run, bank, 0, dev, expert)
@@ -349,8 +368,7 @@ def train_expert(run: Run, expert: str) -> dict:
                 say(run.card, expert=expert, step=step, rolled_back_to=best_step, step_scale=optimizer.scale)
             elif result["score"] > best_score:
                 best_vector, best_score, best_step = bank.vectors[0].detach().clone(), result["score"], step
-    with torch.no_grad():
-        bank.vectors[0].copy_(best_vector)
+    save_best(run, bank, best_vector, optimizer, step, best_step, expert, path)
     final = {"base": evaluate(run, bank, None, test, expert), "steered": evaluate(run, bank, 0, test, expert),
              "random": random_control(run, bank, test, expert)}
     report = {"expert": expert, "updates": step, "dev_base": base_dev["score"], "dev_history": history,
@@ -473,7 +491,7 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--momentum", type=float, default=0.9)
     parser.add_argument("--max-kl", type=float, default=0.01)
     parser.add_argument("--lr-fraction", type=float, default=0.001)
-    parser.add_argument("--cap-fraction", type=float, default=0.10)
+    parser.add_argument("--cap-fraction", type=float, default=0.50, help="Largest vector, as a share of a typical token.")
     parser.add_argument("--fresh", action="store_true")
     return parser
 

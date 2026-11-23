@@ -342,6 +342,30 @@ class TestCardCpus(unittest.TestCase):
                                  ("threads", len(learner))])
 
 
+class TestCapAndBestVector(unittest.TestCase):
+    def test_huge_first_token_inflates_average_but_not_typical_size(self):
+        tensor = torch.tensor([[[8200.0, 0.0], [25.0, 0.0], [26.0, 0.0], [27.0, 0.0], [28.0, 0.0]]])
+        average, typical = pilot.layer_sizes(tensor, torch.ones(1, 5))
+        self.assertGreater(average, 1000)
+        self.assertEqual(typical, 27.0)  # The middle of 25, 26, 27, 28, 8200.
+
+    def test_padding_is_not_measured(self):
+        tensor = torch.tensor([[[9999.0, 0.0], [4.0, 0.0]]])
+        self.assertEqual(pilot.layer_sizes(tensor, torch.tensor([[0, 1]])), (4.0, 4.0))
+
+    def test_default_cap_is_half_a_typical_token(self):
+        self.assertEqual(pilot.make_parser().parse_args([]).cap_fraction, 0.50)
+
+    def test_finished_file_holds_the_best_vector_not_the_last(self):
+        bank = SimpleNamespace(vectors=[torch.nn.Parameter(torch.full((3, 4), 9.0))])
+        optimizer = SimpleNamespace(state_dict=lambda: {})
+        saved = {}
+        with mock.patch.object(pilot, "save_atomic", lambda _t, state, _p: saved.update(state)):
+            pilot.save_best(SimpleNamespace(torch=torch), bank, torch.full((3, 4), 2.0), optimizer, 86, 40, "story", "x")
+        self.assertTrue((saved["bank"]["vectors.0"] == 2.0).all())
+        self.assertEqual((saved["step"], saved["best_step"]), (86, 40))
+
+
 class TestSamplerChoice(unittest.TestCase):
     def test_hugging_face_is_the_default(self):
         args = pilot.make_parser().parse_args([])
