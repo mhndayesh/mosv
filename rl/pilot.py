@@ -36,7 +36,6 @@ WIDTH = 1024
 MAX_CHUNK_TOKENS = 4000  # float16 uses half the gradient memory of the 2,000-token float32 limit.
 EVAL_BATCH = 32
 VLLM_CHUNK_TOKENS = 2000  # vLLM shares the card, so PyTorch gets smaller batches.
-VLLM_EVAL_BATCH = 12
 GENERATE_CELLS = 22000  # Answers x tokens per batch. Story fit this; long engineering prompts hit 13.7 GB without it.
 CHAT_TOKENS = 16
 PROMPT_LENGTH_STEP = 32  # Fewer distinct shapes means fewer slow first-time GPU kernels.
@@ -47,7 +46,6 @@ MAX_BROKEN_RISE = 0.10  # Roll back if this many more dev answers break than in 
 MAX_GRAD_NORM = 1.0
 START_GAP_SECONDS = 3
 SEED = 2026
-EVAL_ENGINE = "hf"  # Dev and test scoring always use the Hugging Face model, whatever --sampler is.
 
 
 @dataclass
@@ -111,21 +109,33 @@ def activation_norms(run: Run, rows: list[dict]):
     return torch.tensor([totals[slot] for slot in range(len(LAYERS))], device="cuda:0")
 
 
+def eval_answers_hf(run: Run, bank, choice, rows: list[dict]) -> list[list[int]]:
+    answers = []
+    for start in range(0, len(rows), EVAL_BATCH):
+        ids, mask = encode(run, [row["prompt"] for row in rows[start:start + EVAL_BATCH]])
+        with bank.choose(choice):
+            answers += generate(run, ids, mask, sample=False)
+        run.torch.cuda.empty_cache()
+    return answers
+
+
+def eval_answers(run: Run, bank, choice, rows: list[dict]) -> list[list[int]]:
+    """One repeatable answer per row, from the same engine that writes the training answers."""
+    if run.sampler is None:
+        return eval_answers_hf(run, bank, choice, rows)
+    prompts = run.tokenizer(chat_texts(run.tokenizer, [row["prompt"] for row in rows]),
+                            add_special_tokens=False)["input_ids"]
+    return run.sampler.best_answers(prompts, None if choice is None else bank.vectors[choice])
+
+
 def evaluate(run: Run, bank, choice, rows: list[dict], expert: str) -> dict:
     results, samples = [], []
     ordered = sorted(rows, key=lambda row: len(row["prompt"]))
-    batch_size = VLLM_EVAL_BATCH if run.args.sampler == "vllm" else EVAL_BATCH
-    for start in range(0, len(ordered), batch_size):
-        chunk = ordered[start:start + batch_size]
-        ids, mask = encode(run, [row["prompt"] for row in chunk])
-        with bank.choose(choice):
-            completions = generate(run, ids, mask, sample=False)
-        run.torch.cuda.empty_cache()
-        for row, tokens in zip(chunk, completions):
-            text = decode(run, tokens)
-            results.append(score_response(expert, text, row["prompt"]))
-            if len(samples) < 3 and start == 0:
-                samples.append({"prompt": row["prompt"][:160], "answer": text[:700]})
+    for row, tokens in zip(ordered, eval_answers(run, bank, choice, ordered)):
+        text = decode(run, tokens)
+        results.append(score_response(expert, text, row["prompt"]))
+        if len(samples) < 3:
+            samples.append({"prompt": row["prompt"][:160], "answer": text[:700]})
     names = sorted({name for result in results for name in result.checks})
     return {"score": round(sum(r.score for r in results) / len(results), 4),
             "degenerate": round(sum(r.degenerate for r in results) / len(results), 4),
@@ -308,7 +318,7 @@ def train_expert(run: Run, expert: str) -> dict:
         optimizer.load_state_dict(state["optimizer"])
         step = state["step"]
     say(run.card, expert=expert, start_step=step, optimizer=args.optimizer, sampler=args.sampler,
-        eval_engine=EVAL_ENGINE,
+        eval_engine=args.sampler,
         activation_norms=[round(float(v), 2) for v in norms], caps=[round(float(v), 2) for v in caps],
         prompts={"train": len(train), "dev": len(dev), "test": len(test)})
     base_dev = evaluate(run, bank, None, dev, expert)
@@ -408,8 +418,8 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dtype", choices=["float16", "float32"], default="float16")
     parser.add_argument("--compile", action="store_true")
     parser.add_argument("--sampler", choices=["hf", "vllm"], default="hf",
-                        help="Who writes the training answers. Evaluation always uses the Hugging Face model.")
-    parser.add_argument("--kv-cache-dtype", default="auto", help="vLLM cache type; fp8 quality is still unchecked.")
+                        help="Who writes the training and scoring answers.")
+    parser.add_argument("--kv-cache-dtype", default="auto", help="vLLM cache type; fp8 drifted from PyTorch in tests.")
     parser.add_argument("--updates", type=int, default=40)
     parser.add_argument("--prompts", type=int, default=16)
     parser.add_argument("--group", type=int, default=4)

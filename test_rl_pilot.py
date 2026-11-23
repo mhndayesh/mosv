@@ -203,6 +203,9 @@ class FakeLLM:
         self.events.append("push")
         self.pushed.append(func)
 
+    def reset_prefix_cache(self):
+        self.events.append("reset")
+
     def generate(self, prompts, params, use_tqdm):
         self.events.append("generate")
         self.prompts += [p["prompt_token_ids"] for p in prompts]
@@ -264,12 +267,26 @@ class TestVllmRollouts(unittest.TestCase):
         run, llm, events = vllm_run()
         rollouts(run, self.ROWS, torch.full((3, 4), 0.5))
         rollouts(run, self.ROWS, torch.full((3, 4), 2.0))
-        self.assertEqual(events, ["push", "generate", "push", "generate"])
+        self.assertEqual(events, ["push", "reset", "generate", "push", "reset", "generate"])
         model = fake_model()
         llm.pushed[1](model)
         for index in (7, 14, 21):
             self.assertEqual(model.model.layers[index].steering_delta.tolist(), [2.0] * 4)
         self.assertEqual(model.model.layers[0].steering_delta.tolist(), [0.0] * 4)
+
+    def test_scoring_uses_the_chosen_vector_and_clears_old_prompt_work(self):
+        run, llm, events = vllm_run(group=1)
+        run.sampler.greedy = SimpleNamespace(group=1)
+        bank = SimpleNamespace(vectors=[torch.full((3, 4), 2.0)])
+        answers = pilot.eval_answers(run, bank, 0, self.ROWS)
+        self.assertEqual(answers, [[1, 0, EOS], [1, 0, EOS]])
+        self.assertEqual(events, ["push", "reset", "generate"])
+        pilot.eval_answers(run, bank, None, self.ROWS)
+        model = fake_model()
+        llm.pushed[0](model)
+        self.assertEqual(model.model.layers[7].steering_delta.tolist(), [2.0] * 4)
+        llm.pushed[1](model)
+        self.assertEqual(model.model.layers[7].steering_delta.tolist(), [0.0] * 4)
 
     def test_prompt_too_long_for_the_engine_is_refused(self):
         run, _, _ = vllm_run(max_new=100)
@@ -282,7 +299,6 @@ class TestSamplerChoice(unittest.TestCase):
         args = pilot.make_parser().parse_args([])
         self.assertEqual((args.sampler, args.kv_cache_dtype), ("hf", "auto"))
         self.assertEqual(pilot.make_parser().parse_args(["--sampler", "vllm"]).sampler, "vllm")
-        self.assertEqual(pilot.EVAL_ENGINE, "hf")
 
     def test_no_sampler_means_hugging_face_generation(self):
         with mock.patch.object(pilot, "sample_rollouts_hf", return_value="hf") as hf, \
