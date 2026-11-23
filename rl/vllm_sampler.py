@@ -17,7 +17,7 @@ from pathlib import Path
 from rl.policy import trim_completion
 
 PLUGIN_DIR = Path(__file__).parent / "vllm_plugin"
-GPU_MEMORY_UTILIZATION = 0.30  # 0.40 reached 15.55 GB plus shared RAM next to PyTorch on the main card.
+GPU_MEMORY_UTILIZATION = 0.25  # 0.30 reached 14.17 GB next to PyTorch and the desktop on the main card.
 MAX_NUM_SEQS = 256
 MAX_NUM_BATCHED_TOKENS = 8192
 MAX_MODEL_LEN = 1024  # Prompt plus answer must fit in this.

@@ -294,6 +294,54 @@ class TestVllmRollouts(unittest.TestCase):
             rollouts(run, [{"prompt": "a" * (MAX_MODEL_LEN - 99)}])
 
 
+class TestCardCpus(unittest.TestCase):
+    def test_engine_and_learner_split_each_cards_cpus(self):
+        for name, spec in pilot.PIPELINES.items():
+            engine, learner = set(pilot.ENGINE_CPUS[name]), set(pilot.learner_cpus(name))
+            self.assertFalse(engine & learner)
+            self.assertEqual(engine | learner, set(spec["build"] + spec["gpu"]))
+
+    def test_cards_share_no_cpus(self):
+        main = set(pilot.ENGINE_CPUS["main"] + pilot.learner_cpus("main"))
+        second = set(pilot.ENGINE_CPUS["second"] + pilot.learner_cpus("second"))
+        self.assertFalse(main & second)
+
+    def test_pin_moves_every_thread_and_skips_ended_ones(self):
+        calls = []
+
+        def pin(thread, cpus):
+            calls.append((thread, cpus))
+            if thread == 12:
+                raise ProcessLookupError
+
+        with mock.patch.object(pilot.os, "listdir", return_value=["11", "12", "13"]), \
+                mock.patch.object(pilot.os, "sched_setaffinity", pin, create=True):
+            pilot.pin_process([4, 5])
+        self.assertEqual(calls, [(11, [4, 5]), (12, [4, 5]), (13, [4, 5])])
+
+    def test_close_stops_engine_children_then_exits(self):
+        stuck, clean = mock.Mock(), mock.Mock()
+        stuck.is_alive.return_value, clean.is_alive.return_value = True, False
+        with mock.patch.object(pilot.mp, "active_children", return_value=[stuck, clean]), \
+                mock.patch.object(pilot.os, "_exit") as leave:
+            pilot.close_worker()
+        stuck.terminate.assert_called_once()
+        clean.terminate.assert_called_once()
+        stuck.kill.assert_called_once()
+        clean.kill.assert_not_called()
+        leave.assert_called_once_with(0)
+
+    def test_vllm_starts_on_engine_cpus_then_learner_moves(self):
+        order, fake_torch = [], SimpleNamespace(set_num_threads=lambda n: order.append(("threads", n)))
+        args = SimpleNamespace(group=4, max_new=256, kv_cache_dtype="auto")
+        with mock.patch.object(pilot, "pin_process", lambda cpus: order.append(("pin", cpus))), \
+                mock.patch.object(pilot.VllmSampler, "start", lambda *a: order.append(("start",)) or "engine"):
+            self.assertEqual(pilot.start_sampler("main", args, {EOS}, fake_torch), "engine")
+        learner = pilot.learner_cpus("main")
+        self.assertEqual(order, [("pin", pilot.ENGINE_CPUS["main"]), ("start",), ("pin", learner),
+                                 ("threads", len(learner))])
+
+
 class TestSamplerChoice(unittest.TestCase):
     def test_hugging_face_is_the_default(self):
         args = pilot.make_parser().parse_args([])

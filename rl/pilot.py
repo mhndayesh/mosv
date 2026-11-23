@@ -46,6 +46,9 @@ MAX_BROKEN_RISE = 0.10  # Roll back if this many more dev answers break than in 
 MAX_GRAD_NORM = 1.0
 START_GAP_SECONDS = 3
 SEED = 2026
+ENGINE_STOP_SECONDS = 10
+# vLLM used about 2x PyTorch's CPU in the retrain, so it gets the P-core threads and PyTorch the card's E-cores.
+ENGINE_CPUS = {"main": [0, 1, 2, 3, 4, 5], "second": [6, 7, 8, 9, 10, 11]}
 
 
 @dataclass
@@ -361,6 +364,42 @@ def train_expert(run: Run, expert: str) -> dict:
     return report
 
 
+def learner_cpus(name: str) -> list[int]:
+    """The card's CPU threads that vLLM does not use."""
+    spec = PIPELINES[name]
+    return sorted(set(spec["build"] + spec["gpu"]) - set(ENGINE_CPUS[name]))
+
+
+def pin_process(cpus: list[int]) -> None:
+    """Move every thread of this process. sched_setaffinity(0) alone moves only the calling thread."""
+    for thread in os.listdir("/proc/self/task"):
+        try:
+            os.sched_setaffinity(int(thread), cpus)
+        except ProcessLookupError:
+            pass  # The thread ended between listing and pinning.
+
+
+def start_sampler(name: str, args, eos: set, torch):
+    """vLLM inherits the engine CPUs when it starts; this process then moves to the learner CPUs."""
+    pin_process(ENGINE_CPUS[name])
+    sampler = VllmSampler.start(MODEL, args.group, args.max_new, eos, args.kv_cache_dtype)
+    cpus = learner_cpus(name)
+    pin_process(cpus)
+    torch.set_num_threads(len(cpus))
+    return sampler
+
+
+def close_worker() -> None:
+    """vLLM's engine keeps this process and its VRAM alive after training, so end both explicitly."""
+    for child in mp.active_children():
+        child.terminate()
+        child.join(ENGINE_STOP_SECONDS)
+        if child.is_alive():
+            child.kill()
+    sys.stdout.flush()
+    os._exit(0)
+
+
 def worker(name: str, experts, args, ready) -> None:
     spec = PIPELINES[name]
     os.sched_setaffinity(0, spec["build"] + spec["gpu"])
@@ -380,7 +419,7 @@ def worker(name: str, experts, args, ready) -> None:
     tokenizer = AutoTokenizer.from_pretrained(MODEL, padding_side="left")
     eos = {tokenizer.eos_token_id, tokenizer.convert_tokens_to_ids("<|endoftext|>")}
     # vLLM goes first so it takes its share of the card before the PyTorch model and gradient batches.
-    sampler = VllmSampler.start(MODEL, args.group, args.max_new, eos, args.kv_cache_dtype)         if args.sampler == "vllm" else None
+    sampler = start_sampler(name, args, eos, torch) if args.sampler == "vllm" else None
     model = AutoModelForCausalLM.from_pretrained(MODEL, dtype=getattr(torch, args.dtype)).to("cuda:0").eval()
     for weight in model.parameters():
         weight.requires_grad_(False)
@@ -392,6 +431,8 @@ def worker(name: str, experts, args, ready) -> None:
         say(name, took_next_behavior=expert)
         train_expert(run, expert)
     say(name, peak_reserved_gb=round(torch.cuda.max_memory_reserved() / 1e9, 2), all_done=True)
+    if sampler is not None:
+        close_worker()
 
 
 def next_expert(experts) -> str | None:
