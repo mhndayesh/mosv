@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qwen-steering"
+version = "0.1.0"
+description = "Adds trained steering vectors to vLLM's Qwen3 model"
+
+[project.entry-points."vllm.general_plugins"]
+qwen_steering = "qwen_steering:register"
+
+[tool.setuptools]
+packages = ["qwen_steering"]

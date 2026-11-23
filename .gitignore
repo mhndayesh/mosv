@@ -1,0 +1,25 @@
+# Research-only datasets, reports and trained outputs
+data_review/
+checkpoints/
+*.pt
+*.npz
+*.safetensors
+*.parquet
+*.jsonl
+*.gguf
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+
+# Secrets and local settings
+.env
+.env.*
+.claude/settings.local.json
