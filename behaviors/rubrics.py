@@ -24,6 +24,12 @@ MAX_WORDS_PER_SENTENCE = 16
 MAX_LONG_WORD_SHARE = 0.15
 LONG_WORD_LETTERS = 9
 MIN_TOPIC_OVERLAP = 0.25
+NGRAM = 4
+FREE_REPETITION = 0.2
+DEGENERATE_REPETITION = 0.6
+MAX_DUPLICATE_FILES = 0.1
+MIN_STAGE_CONTENT = 1
+LEARNER_PENALTY = 0.2
 
 WORD = re.compile(r"[A-Za-z']+")
 SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+|\n+")
@@ -95,6 +101,15 @@ PRACTICE = rx(r"let's try|lets try|try it|your turn|now you|you try|can you try|
 CHECK_WORD = rx(r"what|why|how|which|who|where|can you|do you")
 RECAP = rx(r"today we learned|we learned|to recap|in summary|remember that|let's review|review"
            r"|what we learned|so now you know")
+LESSON_SPLIT = re.compile(r"(?<=[.!?])(?<!\d\.)\s+")
+FILLER_WORDS = frozenset(
+    "let lets let's the and you your our are for how one was did get got has his her she him its can will "
+    "then once now what does here there practice practise learn check review recap try exercise exercises "
+    "together think answer finish start okay".split()
+)
+LEARNER = rx(r"i (?:need|have|want|must|will|can|should|am going|'ll)(?: to)? "
+             r"(?:practice|practise|learn|review|study|think|check|finish|answer)"
+             r"|once i (?:learn|finish|practice)|let me think|let me learn")
 
 
 @dataclass(frozen=True)
@@ -123,10 +138,32 @@ def content_words(text: str) -> set[str]:
     return {word for word in words(text) if len(word) >= 4 and word not in STOPWORDS}
 
 
-def is_degenerate(text: str) -> bool:
+def repeat_share(items: list) -> float:
+    """Share of items that are copies of an earlier item: 0 when all differ, near 1 for a loop."""
+    return 0.0 if len(items) < 2 else 1 - len(set(items)) / len(items)
+
+
+def repetition(text: str) -> float:
+    """Worst of repeated word 4-grams, repeated sentences and repeated lines, in [0, 1)."""
+    tokens = words(text)
+    grams = [tuple(tokens[i:i + NGRAM]) for i in range(len(tokens) - NGRAM + 1)]
+    spoken = [" ".join(words(part)) for part in sentences(text)]
+    lines = [" ".join(words(line)) for line in text.splitlines()]
+    return max(repeat_share(grams), repeat_share([part for part in spoken if " " in part]),
+               repeat_share([line for line in lines if line]))
+
+
+def repetition_factor(repeated: float) -> float:
+    """1.0 up to FREE_REPETITION, falling in a straight line to 0.0 at DEGENERATE_REPETITION."""
+    return min(1.0, max(0.0, (DEGENERATE_REPETITION - repeated) / (DEGENERATE_REPETITION - FREE_REPETITION)))
+
+
+def is_degenerate(text: str, repeated: float | None = None) -> bool:
     """Blocks empty, looping or keyword-stuffed output from earning any reward."""
     tokens = words(text)
     if len(tokens) < MIN_WORDS or len(set(tokens)) / len(tokens) < MIN_UNIQUE_WORD_SHARE:
+        return True
+    if (repetition(text) if repeated is None else repeated) >= DEGENERATE_REPETITION:
         return True
     repeats = Counter(" ".join(words(line)) for line in sentences(text) if len(words(line)) >= 3)
     return bool(repeats) and repeats.most_common(1)[0][1] > MAX_SENTENCE_REPEATS
@@ -170,6 +207,29 @@ def tree_lines(text: str) -> list[str]:
             and FILE_TOKEN.search(line) and not STEP_LINE.match(line)]
 
 
+TREE_PREFIX = re.compile(r"^[^\w.]*")
+
+
+def tree_paths(lines: list[str]) -> list[str]:
+    """Full path of each tree line, so `app/README.md` and `README.md` are different files."""
+    stack: list[tuple[int, str]] = []
+    paths = []
+    for line in lines:
+        indent = len(TREE_PREFIX.match(line).group())
+        name = line[indent:].split()[0] if line[indent:].split() else line.strip()
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        paths.append("/".join([parent for _, parent in stack] + [name]).lower())
+        if name.endswith("/"):
+            stack.append((indent, name.rstrip("/")))
+    return paths
+
+
+def unique_tree(lines: list[str]) -> list[str]:
+    seen: set[str] = set()
+    return [line for line, path in zip(lines, tree_paths(lines)) if not (path in seen or seen.add(path))]
+
+
 def tests_match_source(tree_text: str) -> bool:
     tested = {(a or b).lower() for a, b in TEST_FILE.findall(tree_text)}
     code = {name.lower() for name in CODE_FILE.findall(tree_text)
@@ -194,7 +254,8 @@ def has_body(text: str, start: int | None, end: int | None) -> bool:
 
 
 def engineering_checks(text: str) -> dict[str, bool]:
-    tree = tree_lines(text)
+    listed = tree_lines(text)
+    tree = unique_tree(listed)
     tree_text = "\n".join(tree)
     tree_at = text.find(tree[0]) if tree else None
     requirements, design = section_at(text, REQUIREMENTS_HEAD), section_at(text, DESIGN_HEAD)
@@ -203,6 +264,7 @@ def engineering_checks(text: str) -> dict[str, bool]:
         "requirements_section": has_body(text, requirements, design if in_order(requirements, design) else tree_at),
         "design_section": in_order(requirements, design) and has_body(text, design, tree_at),
         "file_tree": len(tree) >= MIN_TREE_LINES,
+        "no_duplicate_files": bool(listed) and (len(listed) - len(tree)) / len(listed) <= MAX_DUPLICATE_FILES,
         "source_and_tests_separate": bool(SOURCE_DIR.search(tree_text) and TEST_DIR.search(tree_text)),
         "tests_match_source": tests_match_source(tree_text),
         "readme": bool(README.search(tree_text)),
@@ -280,7 +342,35 @@ def question_after(text: str, position: int | None) -> int | None:
     return None
 
 
+def substantive(sentence: str) -> bool:
+    """A stage sentence needs real subject words, not just 'Let's practice.'"""
+    return len({word for word in words(sentence) if len(word) >= 3 and word not in FILLER_WORDS
+                and word not in STOPWORDS}) >= MIN_STAGE_CONTENT
+
+
+def lesson_text(text: str) -> str:
+    """The lesson without repeated, empty or learner-voice sentences, so a looped phrase can earn a stage only once."""
+    seen: set[str] = set()
+    kept = []
+    for line in text.splitlines():
+        keep = []
+        for part in LESSON_SPLIT.split(line):
+            key = " ".join(words(part))
+            if substantive(part) and not LEARNER.search(part) and key not in seen:
+                seen.add(key)
+                keep.append(part)
+        if keep:
+            kept.append(" ".join(keep))
+    return "\n".join(kept)
+
+
+def learner_hits(text: str) -> int:
+    """Times the answer talks like the student ('I need to practice') instead of the teacher."""
+    return len(LEARNER.findall(text))
+
+
 def teaching_checks(text: str) -> dict[str, bool]:
+    text = lesson_text(text)
     parts = real_sentences(text)
     objective, example, modeling = first(OBJECTIVE, text), first(EXAMPLE, text), first(MODELING, text)
     practice = first(PRACTICE, text, modeling or 0)
@@ -314,12 +404,19 @@ def topic_match(prompt: str | None, text: str) -> float:
 CHECKLISTS = {"engineering": engineering_checks, "story": story_checks, "teaching": teaching_checks}
 
 
+def learner_factor(behavior: str, text: str) -> float:
+    """Each 'I need to practice' costs 20% of a lesson's score; other behaviors are not affected."""
+    return max(0.0, 1 - LEARNER_PENALTY * learner_hits(text)) if behavior == "teaching" else 1.0
+
+
 def score_response(behavior: str, text: str, prompt: str | None = None) -> Score:
-    """Share of checks passed, in [0, 1], reduced when the answer ignores the prompt."""
+    """Share of checks passed, in [0, 1], reduced when the answer ignores the prompt, loops or repeats itself."""
     if behavior not in CHECKLISTS:
         raise ValueError(f"Unknown behavior: {behavior}")
-    if is_degenerate(text):
+    repeated = repetition(text)
+    if is_degenerate(text, repeated):
         return Score(behavior, 0.0, {}, True, 0.0)
     checks = CHECKLISTS[behavior](text)
     topic = topic_match(prompt, text)
-    return Score(behavior, topic * sum(checks.values()) / len(checks), checks, False, topic)
+    kept = repetition_factor(repeated) * learner_factor(behavior, text)
+    return Score(behavior, topic * kept * sum(checks.values()) / len(checks), checks, False, topic)

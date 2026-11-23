@@ -1,62 +1,31 @@
-"""Load the saved in-model steering experts/router and compare against base."""
+"""Answer one prompt: show the route, the steered answer and the unsteered answer.
+
+Run: python infer.py "Write a short story about a fox" --run pilot_final
+"""
 
 from __future__ import annotations
 
 import argparse
 
-import torch
-
-from steering import install_steering, router_features
-from train_rl import load_base, format_prompt
+from system import MAX_NEW_TOKENS, NONE, load_system
 
 
-@torch.no_grad()
-def greedy_reply(model, tokenizer, ids, bank, choice, max_new_tokens):
-    with bank.choose(choice):
-        out = model.generate(
-            input_ids=ids,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,
-            use_cache=True,
-            pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
-        )
-    return tokenizer.decode(out[0, ids.size(1):], skip_special_tokens=True).strip()
-
-
-def main(args):
-    checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
-    tokenizer, model, device = load_base(checkpoint["model_id"])
-    bank, router = install_steering(
-        model, checkpoint["expert_names"], checkpoint["target_layers"]
-    )
-    bank.load_state_dict(checkpoint["bank_state_dict"])
-    router.load_state_dict(checkpoint["router_state_dict"])
-    model.eval()
-
-    prompt = format_prompt(tokenizer, args.task, args.a, args.b)
-    ids = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).input_ids.to(device)
-    with torch.no_grad():
-        routing_logits = router(router_features(model, ids))
-        probabilities = routing_logits.softmax(dim=-1)[0]
-    selected = int(torch.argmax(probabilities).item())
-    if args.force_expert is not None:
-        selected = args.force_expert
-
-    print("Router probabilities:", {
-        name: round(float(probabilities[i]), 4)
-        for i, name in enumerate(bank.expert_names)
-    })
-    print("Selected:", bank.expert_names[selected])
-    print("Without steering:", greedy_reply(model, tokenizer, ids, bank, None, args.max_new_tokens))
-    print("With steering:", greedy_reply(model, tokenizer, ids, bank, selected, args.max_new_tokens))
+def main(args) -> None:
+    system = load_system(args.model, args.run, max_new_tokens=args.max_new_tokens)
+    route = system.route([args.prompt])[0]
+    chosen = args.force or route.name  # --force overrides the router's choice.
+    unsteered = system.generate_fixed([args.prompt], None, args.max_new_tokens)[0]
+    steered = unsteered if chosen == NONE else system.generate_fixed([args.prompt], chosen, args.max_new_tokens)[0]
+    print(f"Route: {route.name} (confidence {route.confidence:.3f})" + (f", forced to {chosen}" if args.force else ""))
+    print(f"\n--- Steered ({chosen}) ---\n{steered}")
+    print(f"\n--- Unsteered ---\n{unsteered}")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--checkpoint", default="checkpoints/steering_bank.pt")
-    parser.add_argument("--task", type=int, choices=[0, 1], default=0)
-    parser.add_argument("--a", type=int, default=32)
-    parser.add_argument("--b", type=int, default=17)
-    parser.add_argument("--force-expert", type=int, choices=[0, 1])
-    parser.add_argument("--max-new-tokens", type=int, default=16)
-    main(parser.parse_args())
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("prompt")
+    ap.add_argument("--run", default="pilot_final", help="folder under checkpoints/rl_pilot with the vectors")
+    ap.add_argument("--model", default=None, help="Qwen3-0.6B folder (else $QWEN_MODEL_PATH, the WSL path, or the hub cache)")
+    ap.add_argument("--force", choices=["engineering", "story", "teaching"], help="override the router's choice")
+    ap.add_argument("--max-new-tokens", type=int, default=MAX_NEW_TOKENS)
+    main(ap.parse_args())

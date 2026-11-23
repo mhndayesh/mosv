@@ -28,12 +28,15 @@ from rl.policy import (
 )
 from rl_math import group_advantages
 from router.pipeline import MODEL, PIPELINES
+from rl.vllm_sampler import VllmSampler, prepare_environment
 
 ROOT = Path(__file__).parent.parent
 LAYERS = (7, 14, 21)
 WIDTH = 1024
 MAX_CHUNK_TOKENS = 4000  # float16 uses half the gradient memory of the 2,000-token float32 limit.
 EVAL_BATCH = 32
+VLLM_CHUNK_TOKENS = 2000  # vLLM shares the card, so PyTorch gets smaller batches.
+VLLM_EVAL_BATCH = 12
 GENERATE_CELLS = 22000  # Answers x tokens per batch. Story fit this; long engineering prompts hit 13.7 GB without it.
 CHAT_TOKENS = 16
 PROMPT_LENGTH_STEP = 32  # Fewer distinct shapes means fewer slow first-time GPU kernels.
@@ -44,6 +47,7 @@ MAX_BROKEN_RISE = 0.10  # Roll back if this many more dev answers break than in 
 MAX_GRAD_NORM = 1.0
 START_GAP_SECONDS = 3
 SEED = 2026
+EVAL_ENGINE = "hf"  # Dev and test scoring always use the Hugging Face model, whatever --sampler is.
 
 
 @dataclass
@@ -55,15 +59,20 @@ class Run:
     pad: int
     args: Any
     card: str
+    sampler: Any = None  # A VllmSampler when --sampler vllm, else None (Hugging Face generation).
 
 
 def say(run_card: str, **row) -> None:
     print(json.dumps({"t": time.strftime("%H:%M:%S"), "card": run_card, **row}), flush=True)
 
 
+def chat_texts(tokenizer, texts: list[str]) -> list[str]:
+    return [tokenizer.apply_chat_template([{"role": "user", "content": text}], tokenize=False,
+                                          add_generation_prompt=True, enable_thinking=False) for text in texts]
+
+
 def encode(run: Run, texts: list[str]):
-    chats = [run.tokenizer.apply_chat_template([{"role": "user", "content": text}], tokenize=False,
-                                               add_generation_prompt=True, enable_thinking=False) for text in texts]
+    chats = chat_texts(run.tokenizer, texts)
     batch = run.tokenizer(chats, padding=True, pad_to_multiple_of=PROMPT_LENGTH_STEP, return_tensors="pt",
                           add_special_tokens=False)
     return batch["input_ids"].to("cuda:0"), batch["attention_mask"].to("cuda:0")
@@ -105,8 +114,9 @@ def activation_norms(run: Run, rows: list[dict]):
 def evaluate(run: Run, bank, choice, rows: list[dict], expert: str) -> dict:
     results, samples = [], []
     ordered = sorted(rows, key=lambda row: len(row["prompt"]))
-    for start in range(0, len(ordered), EVAL_BATCH):
-        chunk = ordered[start:start + EVAL_BATCH]
+    batch_size = VLLM_EVAL_BATCH if run.args.sampler == "vllm" else EVAL_BATCH
+    for start in range(0, len(ordered), batch_size):
+        chunk = ordered[start:start + batch_size]
         ids, mask = encode(run, [row["prompt"] for row in chunk])
         with bank.choose(choice):
             completions = generate(run, ids, mask, sample=False)
@@ -131,9 +141,15 @@ def generation_chunks(run: Run, rows: list[dict]) -> list[list[int]]:
     return token_chunks(list(range(len(rows))), lengths, GENERATE_CELLS // run.args.group)
 
 
-def sample_rollouts(run: Run, bank, rows: list[dict], expert: str) -> tuple:
-    group = run.args.group
-    prompts, completions, rewards, advantages = [], [], [], []
+def add_group(run: Run, expert: str, row: dict, prompt: list[int], answers: list[list[int]], out: tuple) -> None:
+    """Score one prompt's answers and append one entry per answer to the four rollout lists."""
+    scores = [score_response(expert, decode(run, tokens), row["prompt"]).score for tokens in answers]
+    for target, values in zip(out, ([prompt] * len(answers), answers, scores, group_advantages(scores))):
+        target += values
+
+
+def sample_rollouts_hf(run: Run, bank, rows: list[dict], expert: str) -> tuple:
+    group, out = run.args.group, ([], [], [], [])
     for part in generation_chunks(run, rows):
         chunk = [rows[i] for i in part]
         ids, mask = encode(run, [row["prompt"] for row in chunk])
@@ -141,13 +157,26 @@ def sample_rollouts(run: Run, bank, rows: list[dict], expert: str) -> tuple:
             made = generate(run, ids, mask, sample=True, copies=group)
         run.torch.cuda.empty_cache()
         for index, row in enumerate(chunk):
-            answers = made[index * group:(index + 1) * group]
-            scores = [score_response(expert, decode(run, tokens), row["prompt"]).score for tokens in answers]
-            prompts += [ids[index][mask[index].bool()].tolist()] * group
-            completions += answers
-            rewards += scores
-            advantages += group_advantages(scores)
-    return prompts, completions, rewards, advantages
+            add_group(run, expert, row, ids[index][mask[index].bool()].tolist(),
+                      made[index * group:(index + 1) * group], out)
+    return out
+
+
+def sample_rollouts_vllm(run: Run, bank, rows: list[dict], expert: str) -> tuple:
+    """Push the current vector into vLLM first, so the answers come from the policy being trained."""
+    run.sampler.push(bank.vectors[0])
+    prompts = run.tokenizer(chat_texts(run.tokenizer, [row["prompt"] for row in rows]),
+                            add_special_tokens=False)["input_ids"]  # Same tokens the gradient pass sees.
+    out = ([], [], [], [])
+    for row, prompt, answers in zip(rows, prompts, run.sampler.sample(prompts)):
+        add_group(run, expert, row, prompt, answers, out)
+    return out
+
+
+def sample_rollouts(run: Run, bank, rows: list[dict], expert: str) -> tuple:
+    """Returns prompts, completions, rewards, advantages: one entry per answer, group answers per prompt."""
+    sample = sample_rollouts_hf if run.sampler is None else sample_rollouts_vllm
+    return sample(run, bank, rows, expert)
 
 
 def accumulate_gradient(run: Run, bank, prompts, completions, advantages, norm: float) -> tuple[float, int]:
@@ -157,7 +186,8 @@ def accumulate_gradient(run: Run, bank, prompts, completions, advantages, norm: 
     lengths = [len(prompt) + len(completion) for prompt, completion in zip(prompts, completions)]
     loss = 0.0
     with bank.choose(0):
-        for part in token_chunks(active, lengths, MAX_CHUNK_TOKENS):
+        budget = VLLM_CHUNK_TOKENS if run.args.sampler == "vllm" else MAX_CHUNK_TOKENS
+        for part in token_chunks(active, lengths, budget):
             batch = build_policy_batch(torch, [prompts[i] for i in part], [completions[i] for i in part],
                                        run.pad, "cuda:0")
             loss += backward_policy_loss(torch, run.model.model, run.model.lm_head, batch,
@@ -277,7 +307,8 @@ def train_expert(run: Run, expert: str) -> dict:
         bank.load_state_dict(state["bank"], strict=False)
         optimizer.load_state_dict(state["optimizer"])
         step = state["step"]
-    say(run.card, expert=expert, start_step=step, optimizer=args.optimizer,
+    say(run.card, expert=expert, start_step=step, optimizer=args.optimizer, sampler=args.sampler,
+        eval_engine=EVAL_ENGINE,
         activation_norms=[round(float(v), 2) for v in norms], caps=[round(float(v), 2) for v in caps],
         prompts={"train": len(train), "dev": len(dev), "test": len(test)})
     base_dev = evaluate(run, bank, None, dev, expert)
@@ -325,6 +356,8 @@ def worker(name: str, experts, args, ready) -> None:
     os.sched_setaffinity(0, spec["build"] + spec["gpu"])
     os.environ.update(HIP_VISIBLE_DEVICES=spec["card"], CUDA_VISIBLE_DEVICES=spec["card"], HF_HUB_OFFLINE="1",
                       OMP_NUM_THREADS="4", TOKENIZERS_PARALLELISM="true")
+    if args.sampler == "vllm":
+        prepare_environment()
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -335,13 +368,15 @@ def worker(name: str, experts, args, ready) -> None:
         raise RuntimeError(f"Wrong card: bus {bus}, expected {spec['bus']}")
     torch.manual_seed(SEED)
     tokenizer = AutoTokenizer.from_pretrained(MODEL, padding_side="left")
+    eos = {tokenizer.eos_token_id, tokenizer.convert_tokens_to_ids("<|endoftext|>")}
+    # vLLM goes first so it takes its share of the card before the PyTorch model and gradient batches.
+    sampler = VllmSampler.start(MODEL, args.group, args.max_new, eos, args.kv_cache_dtype)         if args.sampler == "vllm" else None
     model = AutoModelForCausalLM.from_pretrained(MODEL, dtype=getattr(torch, args.dtype)).to("cuda:0").eval()
     for weight in model.parameters():
         weight.requires_grad_(False)
     if args.compile:
         compile_layers(torch, model)
-    eos = {tokenizer.eos_token_id, tokenizer.convert_tokens_to_ids("<|endoftext|>")}
-    run = Run(torch, model, tokenizer, eos, tokenizer.pad_token_id, args, name)
+    run = Run(torch, model, tokenizer, eos, tokenizer.pad_token_id, args, name, sampler)
     ready.set()
     while (expert := next_expert(experts)) is not None:
         say(name, took_next_behavior=expert)
@@ -365,13 +400,16 @@ def parse_list(text: str, allowed) -> list[str]:
     return items
 
 
-def main() -> int:
+def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", default="pilot")
     parser.add_argument("--cards", default="main,second")
     parser.add_argument("--experts", default="engineering,story,teaching")
     parser.add_argument("--dtype", choices=["float16", "float32"], default="float16")
     parser.add_argument("--compile", action="store_true")
+    parser.add_argument("--sampler", choices=["hf", "vllm"], default="hf",
+                        help="Who writes the training answers. Evaluation always uses the Hugging Face model.")
+    parser.add_argument("--kv-cache-dtype", default="auto", help="vLLM cache type; fp8 quality is still unchecked.")
     parser.add_argument("--updates", type=int, default=40)
     parser.add_argument("--prompts", type=int, default=16)
     parser.add_argument("--group", type=int, default=4)
@@ -386,7 +424,11 @@ def main() -> int:
     parser.add_argument("--lr-fraction", type=float, default=0.001)
     parser.add_argument("--cap-fraction", type=float, default=0.10)
     parser.add_argument("--fresh", action="store_true")
-    args = parser.parse_args()
+    return parser
+
+
+def main() -> int:
+    args = make_parser().parse_args()
     context = mp.get_context("spawn")
     processes = []
     experts = context.Queue()

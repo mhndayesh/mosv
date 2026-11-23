@@ -1,18 +1,24 @@
 """Run: python -m unittest test_rl_pilot.py"""
 
+import os
 import queue
+import sys
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
 import torch
 from torch import nn
 
 from rl.data import check_separate, split_rows
+from rl import pilot
 from rl.pilot import next_expert, parse_list
 from rl.policy import (
     NormalizedMomentum, ShrinkableAdam, backward_policy_loss, build_policy_batch, kl_divergence, token_chunks,
     trim_completion,
 )
+from rl.vllm_sampler import MAX_MODEL_LEN, VllmSampler
+from rl_math import group_advantages
 
 
 class TinyCore(nn.Module):
@@ -169,6 +175,139 @@ class TestPilotData(unittest.TestCase):
         while (job := next_expert(jobs)) is not None:
             taken.append(job)
         self.assertEqual(taken, ["engineering", "story", "teaching"])
+
+EOS = 99
+
+
+class FakeTokenizer:
+    """A prompt of n letters becomes the n tokens 1..n."""
+
+    def apply_chat_template(self, messages, **_):
+        return messages[0]["content"]
+
+    def __call__(self, texts, add_special_tokens):
+        assert add_special_tokens is False
+        return {"input_ids": [list(range(1, len(text) + 1)) for text in texts]}
+
+    def decode(self, tokens, skip_special_tokens):
+        return " ".join(str(t) for t in tokens)
+
+
+class FakeLLM:
+    """Answer j of a prompt is [first token, j] and then an end token followed by junk."""
+
+    def __init__(self, events, tail=(EOS, 7, 8)):
+        self.events, self.tail, self.pushed, self.prompts = events, tail, [], []
+
+    def apply_model(self, func):
+        self.events.append("push")
+        self.pushed.append(func)
+
+    def generate(self, prompts, params, use_tqdm):
+        self.events.append("generate")
+        self.prompts += [p["prompt_token_ids"] for p in prompts]
+        outputs = [SimpleNamespace(index=j, token_ids=[p["prompt_token_ids"][0], j, *self.tail])
+                   for p in prompts for j in range(params.group)]
+        size = params.group
+        # Engines may list a prompt's answers in any order; the sampler must sort them by index.
+        return [SimpleNamespace(outputs=outputs[i * size:(i + 1) * size][::-1]) for i in range(len(prompts))]
+
+
+def fake_model():
+    layers = [SimpleNamespace(steering_delta=torch.zeros(4, dtype=torch.float16)) for _ in range(22)]
+    return SimpleNamespace(model=SimpleNamespace(layers=layers))
+
+
+def vllm_run(group=3, tail=(EOS, 7, 8), max_new=20):
+    events = []
+    llm = FakeLLM(events, tail)
+    sampler = VllmSampler(llm, SimpleNamespace(group=group), group, max_new, {EOS})
+    run = SimpleNamespace(tokenizer=FakeTokenizer(), args=SimpleNamespace(group=group), sampler=sampler)
+    return run, llm, events
+
+
+def rollouts(run, rows, vectors=None):
+    bank = SimpleNamespace(vectors=[torch.ones(3, 4) if vectors is None else vectors])
+    with mock.patch.object(pilot, "score_response", lambda expert, text, prompt: SimpleNamespace(score=len(text))):
+        return pilot.sample_rollouts(run, bank, rows, "story")
+
+
+class TestVllmRollouts(unittest.TestCase):
+    ROWS = [{"prompt": "ab"}, {"prompt": "abcd"}]
+
+    def test_one_aligned_entry_per_answer_in_prompt_order(self):
+        run, llm, _ = vllm_run(group=3)
+        prompts, completions, rewards, advantages = rollouts(run, self.ROWS)
+        self.assertEqual(llm.prompts, [[1, 2], [1, 2, 3, 4]])
+        self.assertEqual([len(x) for x in (prompts, completions, rewards, advantages)], [6] * 4)
+        self.assertEqual(prompts, [[1, 2]] * 3 + [[1, 2, 3, 4]] * 3)
+        self.assertEqual(completions, [[1, j, EOS] for j in range(3)] * 2)
+        self.assertEqual(rewards, [len(" ".join(map(str, c))) for c in completions])
+        for start in (0, 3):
+            self.assertEqual(advantages[start:start + 3], group_advantages(rewards[start:start + 3]))
+
+    def test_group_size_sets_answers_per_prompt(self):
+        for group in (2, 4, 5):
+            run, _, _ = vllm_run(group=group)
+            prompts, completions, _, _ = rollouts(run, self.ROWS)
+            self.assertEqual((len(prompts), len(completions)), (2 * group, 2 * group))
+
+    def test_answers_stop_at_first_end_token_and_unfinished_answers_stay_whole(self):
+        run, _, _ = vllm_run(group=2)
+        _, completions, _, _ = rollouts(run, self.ROWS)
+        self.assertTrue(all(c[-1] == EOS and c.count(EOS) == 1 for c in completions))
+        run, _, _ = vllm_run(group=2, tail=(5, 6))
+        _, completions, _, _ = rollouts(run, self.ROWS)
+        self.assertEqual(completions[0], [1, 0, 5, 6])
+
+    def test_vector_is_pushed_before_every_sampling_call(self):
+        run, llm, events = vllm_run()
+        rollouts(run, self.ROWS, torch.full((3, 4), 0.5))
+        rollouts(run, self.ROWS, torch.full((3, 4), 2.0))
+        self.assertEqual(events, ["push", "generate", "push", "generate"])
+        model = fake_model()
+        llm.pushed[1](model)
+        for index in (7, 14, 21):
+            self.assertEqual(model.model.layers[index].steering_delta.tolist(), [2.0] * 4)
+        self.assertEqual(model.model.layers[0].steering_delta.tolist(), [0.0] * 4)
+
+    def test_prompt_too_long_for_the_engine_is_refused(self):
+        run, _, _ = vllm_run(max_new=100)
+        with self.assertRaisesRegex(ValueError, "exceeds"):
+            rollouts(run, [{"prompt": "a" * (MAX_MODEL_LEN - 99)}])
+
+
+class TestSamplerChoice(unittest.TestCase):
+    def test_hugging_face_is_the_default(self):
+        args = pilot.make_parser().parse_args([])
+        self.assertEqual((args.sampler, args.kv_cache_dtype), ("hf", "auto"))
+        self.assertEqual(pilot.make_parser().parse_args(["--sampler", "vllm"]).sampler, "vllm")
+        self.assertEqual(pilot.EVAL_ENGINE, "hf")
+
+    def test_no_sampler_means_hugging_face_generation(self):
+        with mock.patch.object(pilot, "sample_rollouts_hf", return_value="hf") as hf, \
+                mock.patch.object(pilot, "sample_rollouts_vllm") as vllm:
+            self.assertEqual(pilot.sample_rollouts(SimpleNamespace(sampler=None), None, [], "story"), "hf")
+        hf.assert_called_once()
+        vllm.assert_not_called()
+
+    def test_engine_gets_the_requested_settings(self):
+        seen = {}
+        fake = SimpleNamespace(LLM=lambda **kw: seen.setdefault("llm", kw) and "engine",
+                               SamplingParams=lambda **kw: seen.setdefault("params", kw))
+        with mock.patch.dict(sys.modules, {"vllm": fake}), mock.patch.dict(os.environ), \
+                mock.patch.object(sys, "path", list(sys.path)):
+            sampler = VllmSampler.start("model-path", 4, 256, {EOS, 5}, kv_cache_dtype="fp8")
+        llm, params = seen["llm"], seen["params"]
+        self.assertEqual((llm["dtype"], llm["kv_cache_dtype"], llm["max_num_seqs"]), ("float16", "fp8", 256))
+        self.assertEqual((llm["max_num_batched_tokens"], llm["max_model_len"]), (8192, MAX_MODEL_LEN))
+        self.assertEqual(llm["hf_overrides"], {"architectures": ["SteeredQwen3ForCausalLM"]})
+        self.assertTrue(llm["disable_log_stats"] and 0 < llm["gpu_memory_utilization"] < 0.5)
+        self.assertEqual({k: params[k] for k in ("n", "temperature", "top_p", "top_k", "repetition_penalty", "max_tokens")},
+                         {"n": 4, "temperature": 1.0, "top_p": 1.0, "top_k": 0, "repetition_penalty": 1.0,
+                          "max_tokens": 256})
+        self.assertEqual(params["stop_token_ids"], [5, EOS])
+        self.assertEqual(sampler.group, 4)
 
 
 if __name__ == "__main__":

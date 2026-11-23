@@ -7,7 +7,7 @@ from behaviors.prepare_data import (
     tidy_case,
 )
 from behaviors.gold_examples import GOLD
-from behaviors.rubrics import score_response, sentences
+from behaviors.rubrics import FREE_REPETITION, repetition, score_response, sentences, unique_tree, tree_lines
 
 ENGINEERING = """Requirements: the app must let a user add, list and delete short notes from the terminal.
 Design: a storage module saves notes as JSON, and a command module handles user input.
@@ -51,6 +51,45 @@ PLAIN = (
     "This program is a tool that people can use on a computer every day for many things. "
     "It works well and it is easy for anyone to open it and use it when they need it, "
     "and it can be changed later on by anyone who would like to do that for their work."
+)
+
+# Real pilot output: the same entries over and over, and a lesson that loops "Let's practice".
+LOOPED_TREE = """Requirements: the app must let a user start, stop and reset a stopwatch from the terminal.
+Design: a timer module counts the seconds, and a command module handles what the user types.
+
+stopwatch-app/
+├── README.md
+├── requirements.txt
+├── package.json
+├── app/
+│   ├── README.md
+│   ├── package.json
+│   ├── package.json
+│   ├── README.md
+│   ├── package.json
+├── .gitignore
+├── README.md
+├── README.md
+"""
+
+LOOPED_LESSON = (
+    "Hello, let's learn about Adjectives! Today, we will practice using adjectives in a fun way. "
+    "Let's start by learning about them.\n\n"
+    "First, I need to practice using adjectives. Let's see... How to use adjectives? For example, if I say "
+    "\"The cat is happy,\" that is an adverb. Let's try to practice.\n\n"
+    "Okay, let's start. I will practice using adjectives. Let's practice. Once I learn, I can practice. "
+    "Let's do it together.\n\n"
+    "Now, let's practice. Let's think. How to use adjectives? Let's practice. Once I learn, I can practice. "
+    "Let's do it. Then, I will practice. Let's check. Then, I will learn. Let's practice. Then, I will answer. "
+    "Let's do it. Once I finish, I will review. Let's check. Let's do it. Let's practice. Then, I will review."
+)
+
+TAUGHT_LESSON = (
+    "Today we will learn about adjectives. Do you remember the word big? "
+    "First, an adjective tells us more about a noun. Next, it can say what a thing looks like. "
+    "Then it can say how many there are. For example, imagine a red ball in the grass. "
+    "Let me show you how I find the adjective. Now it is your turn to try it with a blue cup. "
+    "Which word tells us the color of the cup? Today we learned that adjectives describe nouns."
 )
 
 
@@ -107,6 +146,64 @@ class TestRubrics(unittest.TestCase):
     def test_unknown_behavior_raises(self):
         with self.assertRaises(ValueError):
             score_response("cooking", STORY)
+
+    def test_normal_text_is_not_repetitive(self):
+        for text in (ENGINEERING, STORY, LESSON, TAUGHT_LESSON, *(t for items in GOLD.values() for _, t in items)):
+            self.assertLessEqual(repetition(text), FREE_REPETITION)
+
+    def test_loops_are_degenerate(self):
+        loop = "Let's practice this together now. Then we will check it. " * 12
+        self.assertGreater(repetition(loop), 0.8)
+        self.assertTrue(score_response("teaching", loop).degenerate)
+
+    def test_repetition_lowers_the_score_smoothly(self):
+        padded = STORY + " " + " ".join(sentences(STORY)[:3])
+        mild = score_response("story", padded).score
+        heavy = score_response("story", padded + " " + " ".join(sentences(STORY)[:3] * 2)).score
+        self.assertLess(mild, 1.0)
+        self.assertLess(heavy, mild)
+
+    def test_repeated_file_entries_count_once(self):
+        listed = tree_lines(LOOPED_TREE)
+        self.assertEqual(len(listed), 13)
+        self.assertEqual(len(unique_tree(listed)), 8)  # README.md and package.json also exist under app/
+        checks = score_response("engineering", LOOPED_TREE).checks
+        self.assertTrue(checks["file_tree"])  # 8 real paths
+        self.assertFalse(checks["no_duplicate_files"])
+
+    def test_endless_file_loop_is_degenerate(self):
+        text = LOOPED_TREE + "├── README.md\n" * 20
+        self.assertTrue(score_response("engineering", text).degenerate)
+
+    def test_one_real_entry_repeated_is_not_a_tree(self):
+        tree = "demo/\n" + "├── README.md\n" * 4
+        text = ENGINEERING.split("notes-app/")[0] + tree + "Setup:" + ENGINEERING.split("Setup:")[1]
+        checks = score_response("engineering", text).checks
+        self.assertFalse(checks["file_tree"])
+        self.assertFalse(checks["no_duplicate_files"])
+        self.assertLess(score_response("engineering", text).score, score_response("engineering", ENGINEERING).score)
+
+    def test_same_name_in_another_folder_is_a_new_file(self):
+        paths = unique_tree(["pkg/", "  __init__.py", "  a.py", "tests/", "  __init__.py"])
+        self.assertEqual(len(paths), 5)
+
+    def test_looped_engineering_tree_scores_low(self):
+        self.assertLess(score_response("engineering", LOOPED_TREE).score, 0.4)
+
+    def test_looped_lesson_earns_no_practice_or_check_points(self):
+        result = score_response("teaching", LOOPED_LESSON)
+        self.assertFalse(result.checks.get("models_before_practice", False))
+        self.assertFalse(result.checks.get("stages_in_order", False))
+        self.assertLessEqual(result.score, 0.2)
+
+    def test_empty_stage_phrases_do_not_count(self):
+        hollow = LESSON.replace("Now it is your turn to try it with your cup.", "Let's practice.")
+        self.assertFalse(score_response("teaching", hollow).checks["guided_practice"])
+
+    def test_learner_voice_is_penalised(self):
+        learner = TAUGHT_LESSON.replace("Which word tells", "First, I need to practice. Which word tells")
+        self.assertEqual(score_response("teaching", TAUGHT_LESSON).score, 1.0)
+        self.assertLess(score_response("teaching", learner).score, 0.9)
 
 
 class TestCleaning(unittest.TestCase):
