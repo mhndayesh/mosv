@@ -14,7 +14,7 @@ at most one expert per request. Research only. The checklists judge process and 
 | 5. Retrain the router (8 topics + none) | Done: 2,781 test prompts, 2,178 of 2,184 steers correct, 0 wrong expert, 6 false steers, 3 misses |
 | 6. Small GPU test | Done: split-card run, 4 updates, 13.07 GB peak, 0 GPU faults, about 10-12 s per update |
 | 7. Train all 8 vectors | Stopped by a GPU fault at 18:01: 6 topics tested, email trained but untested, how-to not started |
-| 8. Final test, side-by-side PDF, report | Not started: GPU work is paused until the owner decides |
+| 8. Final test, side-by-side PDF, report | Partly done: 4B PDF built and reviewed by the owner on 2026-11-24. Email final test, how-to training and the full router + vectors test are not done |
 
 Topics: engineering, story, teaching, debugging, math solving, explanation, professional email, how-to guide.
 
@@ -58,9 +58,11 @@ Test scores on held-out prompts. The checklist measures structure, not truth or 
 Open items:
 
 - The run stopped at 18:01 with `HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION`, the second such fault today. Windows logged no GPU error and both cards report OK. The cause is unknown.
-- The email dev score of 0.992 is suspiciously high. Read real answers before trusting it.
+- The email dev score of 0.992 is not trustworthy. In the PDF (page 40) the steered email changed a policy update into a meeting request and still scored 1.00, so the checklist likely rewards format.
 - Debugging excludes prompts too long to leave room for a full answer: 840 train, 105 dev, 114 test.
-- No answers from this run have been read by eye yet, so gaming has not been ruled out.
+- The owner read the PDF, but gaming has not been measured across the full test set.
+- The router sent one debugging prompt to the math vector (PDF page 21), although its earlier test reported 0 wrong experts. The reason is unknown.
+- Knowledge retention is untested: no factual-accuracy check has compared steered and normal answers.
 - The unused vLLM turn-taking code (`CardTurns`, `WeightShuttle`) is still in `rl/vllm_sampler.py`.
 
 Resume the last two topics in WSL. Email skips training and runs its final test:
@@ -75,6 +77,59 @@ $V/bin/python -m rl.pilot --profile qwen4b --run qwen4b_v2 --cards second \
   --experts professional_email,how_to_guide --sampler vllm --vllm-swap separate --compile \
   --updates 86 --prompts 16 --group 4 --max-new 256 --dev 128 --test 300 --eval-every 5
 ```
+
+## Side-by-side review: Qwen3-4B (2026-11-24)
+
+PDF: `data_review/reports/qwen4b_steered_vs_normal.pdf` (gitignored). It shows 46 random held-out prompts, normal answer left and steered answer right: 6 for each of the 7 trained topics, plus 4 normal prompts. How-to is excluded because it has no vector. Prompts over 512 tokens were skipped, answers stop at 256 tokens, and emojis were removed because the PDF font cannot draw them.
+
+The run used the second card only: 179 s, 8.65 GB peak PyTorch memory, 0 GPU errors. Answers are saved in `data_review/reports/compare_4b.json` (gitignored). `reports/compare_4b.py` writes them on one GPU in WSL, and `reports/build_pdf_4b.py <out.pdf>` builds the PDF (needs reportlab).
+
+| Topic (6 prompts) | Normal | Steered |
+|---|---|---|
+| Professional email | 0.35 | 1.00 |
+| Teaching | 0.15 | 0.67 |
+| Story | 0.08 | 0.64 |
+| Math solving | 0.17 | 0.52 |
+| Engineering | 0.00 | 0.39 |
+| Debugging | 0.17 | 0.39 |
+| Explanation | 0.00 | 0.36 |
+
+These are checklist scores on a small sample. They measure structure, not truth or quality.
+
+Router on these 46 prompts: 44 correct, 1 wrong expert (page 21, debugging sent to math), 1 miss (page 11, story left unsteered).
+
+Pages to reread: 40 (email changed its purpose), 22 (debugging answer names an `updateFilter()` cause that is not in the bug report), 21 and 11 (router errors).
+
+### Owner's observation (not a scientific claim)
+
+After reading the PDF, the owner observed that on Qwen3-4B the steering vectors visibly change how the frozen model behaves, executes and structures its answers, regardless of output quality. It works like behavior fine-tuning and does not appear to add information. The owner's reasoning is that a large model already holds broad knowledge but is biased by its training toward certain tasks, so vectors could re-steer it per task or prompt while its weights stay fixed.
+
+This is a logical observation from using the method. It has not been tested formally and is not a scientific fact. Retained knowledge, very large models and undoing a trained bias are all untested.
+
+### Owner's hypothesis: minimize system prompts (untested)
+
+A vector trained per workflow, or per task inside a workflow, can carry that workflow's behavior instructions, so its system prompt can shrink while keeping the same adherence. The goal is to **minimize, not replace**. Example: a novel-writing platform with separate creative workflows and technical workflows (ingestion, uploads, API calls, MCP servers), each with its own vector.
+
+| Part of the system prompt | Plan |
+|---|---|
+| Tone, style, voice, format, step order | Candidate for a vector |
+| Habits such as "ask before assuming" | Possible, needs testing |
+| Facts, platform details, character sheets, story state | Stays in the prompt |
+| API schemas, MCP tool definitions, exact JSON | Stays in the prompt |
+| Hard rules, safety, permissions | Stays in the prompt and is enforced in code |
+
+A workflow already knows which task it is running, so it can load its vector directly without the router.
+
+Risks: stronger steering can break text, prompt caching already makes repeated prompts cheap, the method needs a self-hosted model, and each new model version needs new vectors.
+
+Planned test, on the same prompts:
+
+1. Full system prompt (baseline)
+2. Short prompt only
+3. Short prompt + trained vector
+4. Short prompt + random vector
+
+The hypothesis holds if #3 gets close to #1 and clearly beats #2 and #4, with no rise in broken or off-task answers. The main measure is how many prompt tokens can be removed before adherence falls below the full prompt's.
 
 ## Earlier result: Qwen3-0.6B, run `vllm_full`
 
