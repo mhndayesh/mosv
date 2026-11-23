@@ -12,6 +12,7 @@ import math
 import re
 from collections import Counter
 from dataclasses import dataclass
+from functools import lru_cache
 
 MIN_WORDS = 40
 MIN_UNIQUE_WORD_SHARE = 0.2
@@ -39,10 +40,20 @@ STOPWORDS = frozenset(
     "them then there these they this through very want wanted were what when where which "
     "while will with would your".split()
 )
+# Real answers measured 0.15 to 0.60 of their words from this list (code-heavy engineering plans lowest); a stuffed
+# list of topic words measured 0.00 to 0.06.
+MIN_FUNCTION_WORD_SHARE = 0.10
+FUNCTION_WORDS = frozenset(
+    "the a an and or but of to in on at for with from by as is are was were be been it its this that these those he "
+    "she they we you i his her their our your my me him them us not no so if then than when while because which who "
+    "what there here do does did has have had can could will would should may might into over under up down out "
+    "about after before each every".split()
+)
 REQUEST_WORDS = frozenset(
     "write tell story stories short idea create project software program application simple build teach "
     "lesson student students primary explain help please give need want based following tale fiction "
-    "repository repo code codebase class pupil child children learner young setup start small".split()
+    "repository repo code codebase class pupil child children learner young setup start small "
+    "debug fix solve calculate email draft compose guide simply".split()
 )
 
 
@@ -111,6 +122,35 @@ LEARNER = rx(r"i (?:need|have|want|must|will|can|should|am going|'ll)(?: to)? "
              r"(?:practice|practise|learn|review|study|think|check|finish|answer)"
              r"|once i (?:learn|finish|practice)|let me think|let me learn")
 
+# A story is told, not discussed. These frames talk ABOUT a story ("The story would involve...", "To make it a
+# story...", "Yes, this could become a story") and are the way a model earns story credit without narrating.
+STORY_NOUN = r"(?:story|stories|narrative|tale|storyline|plot|premise)"
+QUOTED = re.compile(r'"[^"]*"|“[^”]*”')
+# A character who learns or realizes something about stories is narrative, not the writer talking about the story.
+CHARACTER_THOUGHT = re.compile(r"\b(?:know\w*|knew|learn\w*|realiz\w+|understood|understanding|believ\w+|discover\w*"
+                               r"|hoped?|felt|saw|dream\w*|wish\w*)\b[^.!?]{0,25}\b(?:that|how)\b", re.I)
+META_STORY = (
+    re.compile(r"\b(?:this|the|that|a|my|your|our|\w+'s)\s+(?:(?:main|whole|entire|overall|basic|full|final|possible"
+               r"|great|good|new)\s+)?(?:story|narrative|tale|storyline|plot|premise)\s+"
+               r"(?:would|could|will|should|can|may|might|must|is about|involves?|needs?|focus(?:es)?"
+               r"|revolves?|centers?|explores?|depicts?|features?|can be|could be)\b", re.I),
+    re.compile(rf"\b(?:could|can|would|might|may)\s+(?:easily\s+)?(?:become|make|turn into|be turned into"
+               rf"|be made(?: into)?)\s+(?:\w+\s+){{0,2}}(?:a|an|the)\s+(?:\w+\s+)?{STORY_NOUN}\b", re.I),
+    re.compile(rf"^to (?:make|turn|write|create|build|develop)\b[^.!?]{{0,40}}\b{STORY_NOUN}\b", re.I),
+    re.compile(rf"\bcan (?:the|this|that) {STORY_NOUN} be\b|\bin this (?:story|narrative),|\bthe question is\b"
+               rf"[^.!?]*\b{STORY_NOUN}\b", re.I),
+    re.compile(r"^(?:yes|sure|certainly|of course|absolutely)[,!][^.!?]*\b(?:story|stories|narrative|tale|idea|premise)\b",
+               re.I),
+    re.compile(rf"\bhere(?:'s| is| are)\s+(?:a|an|the|my|one|some)\s+(?:possible\s+|short\s+|brief\s+|quick\s+)?"
+               rf"(?:{STORY_NOUN}|version|draft|outline|continuation|take)\b|\blet me know if\b"
+               r"|\bwould you like me to\b", re.I),
+    re.compile(r"\bthe (?:main|central|key|core|basic) (?:conflict|theme|plot|idea|premise|characters?|message)\b"
+               r"[^.!?]{0,20}\b(?:is|are|would be|could be|involves?)\b"
+               r"|\b(?:this|that|the) (?:line|quote|prompt|premise|phrase|saying|sentence)\s+"
+               r"(?:is|could|can|would|might|may|has|means|suggests|explores?|evokes?)\b", re.I),
+)
+META_STORY_SLOPE = 3.0
+
 
 @dataclass(frozen=True)
 class Score:
@@ -158,10 +198,16 @@ def repetition_factor(repeated: float) -> float:
     return min(1.0, max(0.0, (DEGENERATE_REPETITION - repeated) / (DEGENERATE_REPETITION - FREE_REPETITION)))
 
 
+def function_word_share(tokens: list[str]) -> float:
+    return sum(token in FUNCTION_WORDS for token in tokens) / max(len(tokens), 1)
+
+
 def is_degenerate(text: str, repeated: float | None = None) -> bool:
     """Blocks empty, looping or keyword-stuffed output from earning any reward."""
     tokens = words(text)
     if len(tokens) < MIN_WORDS or len(set(tokens)) / len(tokens) < MIN_UNIQUE_WORD_SHARE:
+        return True
+    if function_word_share(tokens) < MIN_FUNCTION_WORD_SHARE:  # a salad of topic words has no "the", "and", "to"
         return True
     if (repetition(text) if repeated is None else repeated) >= DEGENERATE_REPETITION:
         return True
@@ -253,7 +299,7 @@ def has_body(text: str, start: int | None, end: int | None) -> bool:
     return start is not None and end is not None and len(words(text[start:end])) >= 6
 
 
-def engineering_checks(text: str) -> dict[str, bool]:
+def engineering_checks(text: str, prompt: str | None = None) -> dict[str, bool]:
     listed = tree_lines(text)
     tree = unique_tree(listed)
     tree_text = "\n".join(tree)
@@ -294,8 +340,21 @@ def closes_at_end(parts: list[str]) -> bool:
     return bool(hits) and hits[-1] / len(parts) >= 0.75
 
 
-def story_checks(text: str) -> dict[str, bool]:
+@lru_cache(maxsize=1 << 16)  # the same sentences are judged by the checklist and by the penalty
+def is_meta_story(sentence: str) -> bool:
+    """True for a sentence that discusses the story instead of telling it. Spoken lines inside quotes are narrative."""
+    narration = QUOTED.sub(" ", sentence)
+    return not CHARACTER_THOUGHT.search(narration) and any(pattern.search(narration) for pattern in META_STORY)
+
+
+def meta_story_share(text: str) -> float:
+    """Share of real sentences that talk about a story rather than tell it."""
     parts = real_sentences(text)
+    return sum(is_meta_story(part) for part in parts) / max(len(parts), 1)
+
+
+def story_checks(text: str, prompt: str | None = None) -> dict[str, bool]:
+    parts = [part for part in real_sentences(text) if not is_meta_story(part)]
     count = max(len(parts), 1)
     opening = " ".join(parts[:max(1, math.ceil(count * 0.2))])
     problems = matching(PROBLEM, parts)
@@ -369,7 +428,7 @@ def learner_hits(text: str) -> int:
     return len(LEARNER.findall(text))
 
 
-def teaching_checks(text: str) -> dict[str, bool]:
+def teaching_checks(text: str, prompt: str | None = None) -> dict[str, bool]:
     text = lesson_text(text)
     parts = real_sentences(text)
     objective, example, modeling = first(OBJECTIVE, text), first(EXAMPLE, text), first(MODELING, text)
@@ -401,12 +460,17 @@ def topic_match(prompt: str | None, text: str) -> float:
     return min(1.0, (len(wanted & content_words(text)) / len(wanted)) / MIN_TOPIC_OVERLAP)
 
 
-CHECKLISTS = {"engineering": engineering_checks, "story": story_checks, "teaching": teaching_checks}
+CHECKLISTS = {"engineering": engineering_checks, "story": story_checks, "teaching": teaching_checks}  # fn(text, prompt)
 
 
 def learner_factor(behavior: str, text: str) -> float:
     """Each 'I need to practice' costs 20% of a lesson's score; other behaviors are not affected."""
     return max(0.0, 1 - LEARNER_PENALTY * learner_hits(text)) if behavior == "teaching" else 1.0
+
+
+def meta_factor(behavior: str, text: str) -> float:
+    """A story that is mostly talk about a story loses credit: 1.0 with none, 0.0 when a third of it is talk."""
+    return max(0.0, 1 - META_STORY_SLOPE * meta_story_share(text)) if behavior == "story" else 1.0
 
 
 def score_response(behavior: str, text: str, prompt: str | None = None) -> Score:
@@ -416,7 +480,10 @@ def score_response(behavior: str, text: str, prompt: str | None = None) -> Score
     repeated = repetition(text)
     if is_degenerate(text, repeated):
         return Score(behavior, 0.0, {}, True, 0.0)
-    checks = CHECKLISTS[behavior](text)
+    checks = CHECKLISTS[behavior](text, prompt)
     topic = topic_match(prompt, text)
-    kept = repetition_factor(repeated) * learner_factor(behavior, text)
+    kept = repetition_factor(repeated) * learner_factor(behavior, text) * meta_factor(behavior, text)
     return Score(behavior, topic * kept * sum(checks.values()) / len(checks), checks, False, topic)
+
+
+import behaviors.process_rubrics  # noqa: E402,F401  (adds debugging, math_solving, explanation, email, how-to)

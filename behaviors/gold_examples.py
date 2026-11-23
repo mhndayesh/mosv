@@ -153,4 +153,109 @@ Installation:
          "You drew a very clear water cycle today. "
          "Today we learned that water moves from the sea to the sky and back again."),
     ],
+    "debugging": [
+        ("My Python function average(numbers) crashes with ZeroDivisionError when I pass an empty list. Help me debug it.",
+         "The function average(numbers) crashes with a ZeroDivisionError whenever the list is empty.\n"
+         "To reproduce it, run `python stats.py` and call `average([])`, which raises the error on the last line.\n"
+         "The root cause is that the function divides the total by len(numbers), and an empty list has length zero, "
+         "so the division fails.\n"
+         "That means the crash is not random, because every empty input reaches the same division.\n"
+         "The fix is to return 0 early when the list is empty, using `if not numbers: return 0`.\n"
+         "After the change, call `average([])` again and confirm it returns 0 instead of raising an error.\n"
+         "Then add a regression test with `assert average([]) == 0` so this empty list case stays covered."),
+        ("My JavaScript button click handler never updates the counter on the page. The console shows no error. Why?",
+         "The counter on the page never changes after a click, and the console shows no error at all.\n"
+         "To reproduce it, open index.html, click the button three times and watch the number stay at zero.\n"
+         "The likely root cause is that the handler runs on a copy of the count, because `let count = 0` is declared "
+         "inside the function.\n"
+         "Each click creates a new variable that starts at zero, so the page text is always set to the same value.\n"
+         "The fix is to declare the variable once outside the handler with `let count = 0;` and then increment it.\n"
+         "Reload the page, click the button three times and confirm the counter now shows three.\n"
+         "Finally add a regression test that simulates three clicks and uses `expect(counter.textContent).toBe(\"3\")`."),
+    ],
+    "math_solving": [
+        ("A bakery sells 12 boxes of muffins each day with 4 muffins in each box. How many muffins does it sell in 5 days?",
+         "We are asked how many muffins the bakery sells in 5 days when it sells 12 boxes each day with 4 muffins in each box.\n"
+         "Plan: first find the muffins sold in one day, then multiply that number by the 5 days.\n"
+         "1. Muffins sold in one day: 12 boxes × 4 muffins = 48 muffins.\n"
+         "2. Muffins sold in 5 days: 48 muffins × 5 days = 240 muffins.\n"
+         "3. Compare with another route: 12 boxes × 5 days = 60 boxes, and 60 boxes × 4 muffins = 240 muffins.\n"
+         "Final answer: the bakery sells 240 muffins in 5 days.\n"
+         "Check: 240 muffins ÷ 5 days = 48 muffins a day, which matches the first step."),
+        ("Solve this equation for x: 3x + 5 = 20.",
+         "We are asked to solve for x in the equation 3x + 5 = 20.\n"
+         "Plan: first subtract 5 from both sides to isolate the term with x, then divide both sides by 3.\n"
+         "1. Subtract 5 from both sides: 20 - 5 = 15, so 3x = 15.\n"
+         "2. Divide both sides by 3: 15 ÷ 3 = 5, so x = 5.\n"
+         "3. Write the solution once more: x = 15 ÷ 3 = 5, and no other value fits.\n"
+         "Final answer: x = 5.\n"
+         "Check: substitute x = 5 into the left side to get 3 × 5 + 5 = 20, which matches the right side."),
+    ],
+    "explanation": [
+        ("Explain why the sky is blue in simple words.",
+         "The sky looks blue because air scatters blue light more than other colors.\n"
+         "This happens because sunlight is a mix of colors and the air bounces the blue part around.\n"
+         "It is like throwing small balls at a fence, since the little ones bounce off in every direction.\n"
+         "For example, when you look up at noon, the sun is high and the sky is a bright blue.\n"
+         "In short, the sky is blue because air scatters blue light."),
+        ("Explain how a refrigerator keeps food cold, like I am ten.",
+         "A refrigerator keeps food cold by moving heat from the inside to the outside.\n"
+         "Inside the fridge, a cold liquid in thin pipes soaks up heat from the food.\n"
+         "That is why the back of a fridge feels warm, because the pump sends heat there.\n"
+         "Think of a sponge that soaks up water from a table and then gets squeezed out over a sink.\n"
+         "For example, put 2 bottles of milk inside, and the pipes pull the heat out of them.\n"
+         "In short, a fridge keeps food cold because it carries heat out of the box."),
+    ],
+    "professional_email": [
+        ("Write a professional email to my manager asking to move the Thursday project meeting because I have a dentist "
+         "appointment.",
+         "Subject: Request to move Thursday's project meeting\n"
+         "Dear Ms. Alvarez,\n"
+         "I am writing to ask if we can move the Thursday project meeting because I have a dentist appointment that morning.\n"
+         "The meeting is scheduled for 10:00 AM on March 14, and my appointment runs from 9:00 to 11:00.\n"
+         "I could join any time after 1:00 PM on Thursday, or at 9:30 AM on Friday, March 15.\n"
+         "Could you let me know which of these times works best for you by Wednesday at noon?\n"
+         "Thank you for your understanding, and I apologize for the short notice.\n"
+         "Kind regards,\n"
+         "Daniel Reyes"),
+        ("Write an email to a customer, Mr. Okafor, explaining that his order 4471 is delayed and offering a refund or a "
+         "new delivery date.",
+         "Subject: Update on your order 4471 and your options\n"
+         "Dear Mr. Okafor,\n"
+         "I am writing to let you know that your order 4471 has been delayed, and I apologize for the inconvenience.\n"
+         "The supplier shipped the items on June 3 instead of May 28, so the new arrival date is June 10.\n"
+         "You can choose a full refund of $84.50 or keep the order and receive it on June 10 with free express shipping.\n"
+         "Please reply to this email by Friday and tell me which option you prefer.\n"
+         "We value your business, and I am happy to answer any questions you have.\n"
+         "Sincerely,\n"
+         "Priya Nair\n"
+         "Customer Support Team"),
+    ],
+    "how_to_guide": [
+        ("How to change a flat bicycle tire.",
+         "Goal: replace a flat bicycle tire tube so the bike is ready to ride again.\n"
+         "You will need:\n"
+         "- A new inner tube\n"
+         "- Two tire levers\n"
+         "- A bike pump\n"
+         "1. Flip the bike over and remove the wheel from the frame.\n"
+         "2. Let all the air out of the tire, then slide a tire lever under the edge to pop it off the rim.\n"
+         "3. Pull out the old tube and check the inside of the tire for sharp objects.\n"
+         "4. Put the new tube inside the tire and add a little air so it holds its shape.\n"
+         "5. Push the tire back onto the rim by hand and skip the levers, because they can pinch the new tube.\n"
+         "6. Fit the wheel back on the frame and pump the tire to the pressure printed on its side.\n"
+         "Common mistake: leaving a sharp thorn inside the tire, which will puncture the new tube again.\n"
+         "To confirm it worked, press the tire firmly and check that it stays hard for a full minute."),
+        ("How to brew a pot of black tea.",
+         "Goal: brew a clear, hot pot of black tea that tastes fresh and is not bitter.\n"
+         "Before you start, you need: a kettle, a teapot, loose tea leaves, fresh water, and a timer.\n"
+         "1. Fill the kettle with fresh cold water and heat it until it just boils.\n"
+         "2. Pour a little hot water into the teapot, swirl it, and tip it out to warm the pot.\n"
+         "3. Add one spoon of tea leaves for each cup, plus one extra spoon for the pot.\n"
+         "4. Pour the hot water over the leaves and put the lid on the teapot.\n"
+         "5. Set the timer for four minutes and let the tea rest.\n"
+         "6. Pour the tea into cups through a strainer.\n"
+         "Warning: do not leave the leaves in the pot for longer than five minutes, because the tea turns bitter.\n"
+         "You will know it worked when the tea is golden brown and smells fresh."),
+    ],
 }
