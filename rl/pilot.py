@@ -21,22 +21,21 @@ from pathlib import Path
 from typing import Any
 
 from behaviors.rubrics import score_response
+from model_profiles import PROFILES, ModelProfile, get_profile, model_width
+from rl import data as rl_data
 from rl.data import BEHAVIORS, read_split
 from rl.policy import (
-    NormalizedMomentum, ShrinkableAdam, backward_policy_loss, build_policy_batch, kl_divergence, token_chunks,
-    trim_completion,
+    NormalizedMomentum, ShrinkableAdam, backward_policy_loss, build_policy_batch, kl_divergence, prepare_layers,
+    token_chunks, trim_completion,
 )
 from rl_math import group_advantages
-from router.pipeline import MODEL, PIPELINES
-from rl.vllm_sampler import VllmSampler, prepare_environment
+from router.pipeline import PIPELINES
+from rl.vllm_sampler import (
+    SWAP_MODES, CardTurns, NoTurns, VllmSampler, WeightShuttle, open_weight_views, prepare_environment,
+)
 
 ROOT = Path(__file__).parent.parent
-LAYERS = (7, 14, 21)
-WIDTH = 1024
-MAX_CHUNK_TOKENS = 4000  # float16 uses half the gradient memory of the 2,000-token float32 limit.
 EVAL_BATCH = 32
-VLLM_CHUNK_TOKENS = 2000  # vLLM shares the card, so PyTorch gets smaller batches.
-GENERATE_CELLS = 22000  # Answers x tokens per batch. Story fit this; long engineering prompts hit 13.7 GB without it.
 CHAT_TOKENS = 16
 PROMPT_LENGTH_STEP = 32  # Fewer distinct shapes means fewer slow first-time GPU kernels.
 LOSS_SCALE = 4096.0
@@ -60,7 +59,9 @@ class Run:
     pad: int
     args: Any
     card: str
+    profile: ModelProfile
     sampler: Any = None  # A VllmSampler when --sampler vllm, else None (Hugging Face generation).
+    turns: Any = None  # Who holds the card. Every GPU step asks for its turn first.
 
 
 def say(run_card: str, **row) -> None:
@@ -101,7 +102,8 @@ def layer_sizes(tensor, mask) -> tuple[float, float]:
 
 def activation_norms(run: Run, rows: list[dict]):
     """Returns (average, typical) per layer: the average sets the step size, the typical size sets the cap."""
-    torch, totals, handles = run.torch, {}, []
+    torch, totals, handles, layers = run.torch, {}, [], run.profile.steering_layers
+    run.turns.for_torch()
     ids, mask = encode(run, [row["prompt"] for row in rows[:EVAL_BATCH]])
 
     def capture(slot):
@@ -109,17 +111,18 @@ def activation_norms(run: Run, rows: list[dict]):
             totals[slot] = layer_sizes(output[0] if isinstance(output, tuple) else output, mask)
         return hook
 
-    for slot, layer in enumerate(LAYERS):
+    for slot, layer in enumerate(layers):
         handles.append(run.model.model.layers[layer].register_forward_hook(capture(slot)))
     with torch.inference_mode():
         run.model.model(input_ids=ids, attention_mask=mask, use_cache=False)
     for handle in handles:
         handle.remove()
-    average, typical = zip(*(totals[slot] for slot in range(len(LAYERS))))
+    average, typical = zip(*(totals[slot] for slot in range(len(layers))))
     return torch.tensor(average, device="cuda:0"), torch.tensor(typical, device="cuda:0")
 
 
 def eval_answers_hf(run: Run, bank, choice, rows: list[dict]) -> list[list[int]]:
+    run.turns.for_torch()
     answers = []
     for start in range(0, len(rows), EVAL_BATCH):
         ids, mask = encode(run, [row["prompt"] for row in rows[start:start + EVAL_BATCH]])
@@ -133,6 +136,7 @@ def eval_answers(run: Run, bank, choice, rows: list[dict]) -> list[list[int]]:
     """One repeatable answer per row, from the same engine that writes the training answers."""
     if run.sampler is None:
         return eval_answers_hf(run, bank, choice, rows)
+    run.turns.for_vllm()
     prompts = run.tokenizer(chat_texts(run.tokenizer, [row["prompt"] for row in rows]),
                             add_special_tokens=False)["input_ids"]
     return run.sampler.best_answers(prompts, None if choice is None else bank.vectors[choice])
@@ -158,7 +162,7 @@ def generation_chunks(run: Run, rows: list[dict]) -> list[list[int]]:
     """Long prompts use more cache memory, so they go in smaller batches."""
     encoded = run.tokenizer([row["prompt"] for row in rows], add_special_tokens=False)["input_ids"]
     lengths = [len(tokens) + CHAT_TOKENS + run.args.max_new for tokens in encoded]
-    return token_chunks(list(range(len(rows))), lengths, GENERATE_CELLS // run.args.group)
+    return token_chunks(list(range(len(rows))), lengths, run.profile.generate_cells // run.args.group)
 
 
 def add_group(run: Run, expert: str, row: dict, prompt: list[int], answers: list[list[int]], out: tuple) -> None:
@@ -169,6 +173,7 @@ def add_group(run: Run, expert: str, row: dict, prompt: list[int], answers: list
 
 
 def sample_rollouts_hf(run: Run, bank, rows: list[dict], expert: str) -> tuple:
+    run.turns.for_torch()
     group, out = run.args.group, ([], [], [], [])
     for part in generation_chunks(run, rows):
         chunk = [rows[i] for i in part]
@@ -184,6 +189,7 @@ def sample_rollouts_hf(run: Run, bank, rows: list[dict], expert: str) -> tuple:
 
 def sample_rollouts_vllm(run: Run, bank, rows: list[dict], expert: str) -> tuple:
     """Push the current vector into vLLM first, so the answers come from the policy being trained."""
+    run.turns.for_vllm()
     run.sampler.push(bank.vectors[0])
     prompts = run.tokenizer(chat_texts(run.tokenizer, [row["prompt"] for row in rows]),
                             add_special_tokens=False)["input_ids"]  # Same tokens the gradient pass sees.
@@ -201,38 +207,27 @@ def sample_rollouts(run: Run, bank, rows: list[dict], expert: str) -> tuple:
 
 def accumulate_gradient(run: Run, bank, prompts, completions, advantages, norm: float) -> tuple[float, int]:
     """Scale up during backprop so tiny float16 gradients do not round to zero."""
-    torch = run.torch
+    torch, profile = run.torch, run.profile
+    run.turns.for_torch()
     active = [i for i, value in enumerate(advantages) if abs(value) > 1e-12]
     lengths = [len(prompt) + len(completion) for prompt, completion in zip(prompts, completions)]
     loss = 0.0
     with bank.choose(0):
-        budget = VLLM_CHUNK_TOKENS if run.args.sampler == "vllm" else MAX_CHUNK_TOKENS
-        for part in token_chunks(active, lengths, budget):
+        for part in token_chunks(active, lengths, profile.chunk_tokens(run.card, run.args.sampler)):
             batch = build_policy_batch(torch, [prompts[i] for i in part], [completions[i] for i in part],
                                        run.pad, "cuda:0")
             loss += backward_policy_loss(torch, run.model.model, run.model.lm_head, batch,
-                                         torch.tensor([advantages[i] for i in part]), norm / LOSS_SCALE)
+                                         torch.tensor([advantages[i] for i in part]), norm / LOSS_SCALE,
+                                         profile.head_chunk)
     for parameter in bank.parameters():
         if parameter.grad is not None:
             parameter.grad /= LOSS_SCALE
     return loss / LOSS_SCALE, len(active)
 
 
-def compile_layers(torch, model) -> None:
-    """Compile each layer for gradient passes. Steering hooks stay outside the compiled code."""
-    def wrap(eager, compiled):
-        def forward(*args, **kwargs):
-            uses_cache = kwargs.get("cache") is not None or kwargs.get("past_key_values") is not None
-            return eager(*args, **kwargs) if uses_cache else compiled(*args, **kwargs)
-        return forward
-
-    for layer in model.model.layers:
-        eager = layer.forward
-        layer.forward = wrap(eager, torch.compile(eager, dynamic=True))
-
-
 def probe_log_probs(run: Run, bank, probe):
     """Word probabilities at the last prompt tokens, used to measure how far a step moved Qwen."""
+    run.turns.for_torch()
     ids, mask = probe
     with bank.choose(0), run.torch.inference_mode():
         hidden = run.model.model(input_ids=ids, attention_mask=mask, use_cache=False).last_hidden_state
@@ -243,11 +238,20 @@ def make_optimizer(run: Run, vector, norms):
     args = run.args
     if args.optimizer == "normalized":
         return NormalizedMomentum(run.torch, vector, norms * args.step_fraction, args.momentum)
-    return ShrinkableAdam(run.torch, vector, args.lr_fraction * float(norms.mean()) / math.sqrt(WIDTH))
+    return ShrinkableAdam(run.torch, vector, args.lr_fraction * float(norms.mean()) / math.sqrt(vector.shape[-1]))
+
+
+def check_vram(run: Run) -> None:
+    """Stop before the driver does: PyTorch's peak plus what other programs hold on this card."""
+    limit = run.profile.hard_stop_gb
+    used = run.torch.cuda.max_memory_reserved() / 1e9 + run.profile.other_vram_gb[run.card]
+    if limit is not None and used > limit:
+        raise RuntimeError(f"{run.card}: {used:.2f} GB is over the {limit} GB limit")
 
 
 def policy_step(run: Run, bank, optimizer, caps, rows: list[dict], expert: str, probe) -> dict:
     torch = run.torch
+    swap_before = run.turns.swap_seconds
     torch.cuda.reset_peak_memory_stats()
     started = time.time()
     prompts, completions, rewards, advantages = sample_rollouts(run, bank, rows, expert)
@@ -255,11 +259,13 @@ def policy_step(run: Run, bank, optimizer, caps, rows: list[dict], expert: str, 
     generate_peak = torch.cuda.max_memory_allocated() / 1e9
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
+    run.turns.for_torch()  # Before the timer, so gradient_s and swap_s do not overlap.
     optimizer.zero_grad(set_to_none=True)
     norm = len(rows) * run.args.group * run.args.max_new
     started = time.time()
     loss, active = accumulate_gradient(run, bank, prompts, completions, advantages, norm)
     gradient_seconds = time.time() - started
+    check_vram(run)
     grad_norm, step_kl, rejected = 0.0, 0.0, False
     if active:
         grad_norm = float(torch.nn.utils.clip_grad_norm_(bank.parameters(), MAX_GRAD_NORM))
@@ -278,6 +284,7 @@ def policy_step(run: Run, bank, optimizer, caps, rows: list[dict], expert: str, 
     return {"reward": round(sum(rewards) / len(rewards), 4), "best": round(max(rewards), 4), "active": active,
             "step_kl": round(step_kl, 5), "rejected": rejected, "step_scale": round(optimizer.scale, 4),
             "generate_s": round(generate_seconds, 2), "gradient_s": round(gradient_seconds, 2),
+            "swap_s": round(run.turns.swap_seconds - swap_before, 2),
             "loss": round(loss, 6), "grad_norm": round(grad_norm, 4),
             "tokens": sum(len(c) for c in completions),
             "generate_peak_gb": round(generate_peak, 2),
@@ -305,16 +312,24 @@ def save_atomic(torch, state: dict, path: Path) -> None:
     os.replace(temp, path)
 
 
-def vector_state(bank, optimizer, step: int, expert: str, **extra) -> dict:
+def vector_state(run: Run, bank, optimizer, step: int, expert: str, **extra) -> dict:
     return {"bank": {"vectors.0": bank.vectors[0].detach().cpu()}, "optimizer": optimizer.state_dict(),
-            "step": step, "expert": expert, "layers": list(LAYERS), **extra}
+            "step": step, "expert": expert, "layers": list(run.profile.steering_layers),
+            "profile": run.profile.name, **extra}
+
+
+def check_resume(state: dict, profile: ModelProfile, path: Path) -> None:
+    """A vector only works on the model and layers it was trained on."""
+    if tuple(state["layers"]) != profile.steering_layers or state.get("profile", "qwen06b") != profile.name:
+        raise ValueError(f"{path} was trained for {state.get('profile', 'qwen06b')} layers {state['layers']}, "
+                         f"not {profile.name} layers {list(profile.steering_layers)}. Use a new --run or --fresh.")
 
 
 def save_best(run: Run, bank, best_vector, optimizer, step: int, best_step: int, expert: str, path: Path) -> None:
     """The finished file must hold the best dev vector, because inference loads this file."""
     with run.torch.no_grad():
         bank.vectors[0].copy_(best_vector)
-    save_atomic(run.torch, vector_state(bank, optimizer, step, expert, best_step=best_step), path)
+    save_atomic(run.torch, vector_state(run, bank, optimizer, step, expert, best_step=best_step), path)
 
 
 def train_expert(run: Run, expert: str) -> dict:
@@ -322,13 +337,13 @@ def train_expert(run: Run, expert: str) -> dict:
 
     torch, args = run.torch, run.args
     folder = ROOT / "checkpoints" / "rl_pilot" / args.run
-    report_dir = ROOT / "data_review" / "rl" / args.run
+    report_dir = rl_data.OUT / args.run
     folder.mkdir(parents=True, exist_ok=True)
     report_dir.mkdir(parents=True, exist_ok=True)
     train, dev, test = (read_split(expert, name) for name in ("routed", "dev", "test"))
     random.Random(SEED).shuffle(train)
     dev, test = dev[:args.dev], test[:args.test]
-    bank = SteeringBank([expert], LAYERS, WIDTH).to("cuda:0")
+    bank = SteeringBank([expert], run.profile.steering_layers, run.model.config.hidden_size).to("cuda:0")
     bank.attach(run.model)
     norms, typical = activation_norms(run, train)
     caps = typical * args.cap_fraction
@@ -336,6 +351,7 @@ def train_expert(run: Run, expert: str) -> dict:
     path, step, history = folder / f"{expert}.pt", 0, []
     if path.exists() and not args.fresh:
         state = torch.load(path, map_location="cuda:0", weights_only=True)
+        check_resume(state, run.profile, path)
         bank.load_state_dict(state["bank"], strict=False)
         optimizer.load_state_dict(state["optimizer"])
         step = state["step"]
@@ -353,7 +369,7 @@ def train_expert(run: Run, expert: str) -> dict:
         rows = [train[(step * args.prompts + i) % len(train)] for i in range(args.prompts)]
         info = policy_step(run, bank, optimizer, caps, rows, expert, probe)
         step += 1
-        save_atomic(torch, vector_state(bank, optimizer, step, expert), path)
+        save_atomic(torch, vector_state(run, bank, optimizer, step, expert), path)
         say(run.card, expert=expert, step=step, **info, seconds=round(time.time() - started, 1))
         if step % args.eval_every == 0 or step == args.updates:
             result = evaluate(run, bank, 0, dev, expert)
@@ -397,14 +413,41 @@ def pin_process(cpus: list[int]) -> None:
             pass  # The thread ended between listing and pinning.
 
 
-def start_sampler(name: str, args, eos: set, torch):
-    """vLLM inherits the engine CPUs when it starts; this process then moves to the learner CPUs."""
-    pin_process(ENGINE_CPUS[name])
-    sampler = VllmSampler.start(MODEL, args.group, args.max_new, eos, args.kv_cache_dtype)
+def start_sampler(name: str, args, eos: set, torch, profile: ModelProfile):
+    """vLLM inherits the engine CPUs each time it starts; this process then moves to the learner CPUs."""
     cpus = learner_cpus(name)
-    pin_process(cpus)
-    torch.set_num_threads(len(cpus))
-    return sampler
+
+    def on_engine_cpus(make):
+        pin_process(ENGINE_CPUS[name])
+        try:
+            return make()
+        finally:
+            pin_process(cpus)
+            torch.set_num_threads(len(cpus))
+
+    total = torch.cuda.get_device_properties(0).total_memory if profile.vllm_memory_gb else None
+    return VllmSampler.start(profile.path, args.group, args.max_new, eos, args.kv_cache_dtype, profile=profile,
+                             card=name, total_bytes=total, swap=args.vllm_swap, around_build=on_engine_cpus)
+
+
+def load_learner(torch, args, profile: ModelProfile, sampler):
+    """Returns the frozen PyTorch model and who holds the card."""
+    from transformers import AutoModelForCausalLM
+
+    if profile.time_share and sampler is not None and args.dtype != "float16":
+        raise ValueError("Turn-taking needs float16; float32 weights would not leave room for gradients")
+    model = AutoModelForCausalLM.from_pretrained(profile.path, dtype=getattr(torch, args.dtype)).eval()
+    for weight in model.parameters():
+        weight.requires_grad_(False)
+    turns = NoTurns()
+    if profile.time_share and sampler is not None:
+        shuttle = WeightShuttle(model, open_weight_views(profile.path), torch.float16, "cuda:0")
+        shuttle.to_cpu()  # Drops the private RAM copy that from_pretrained made.
+        turns = CardTurns(torch, sampler, shuttle)
+    else:
+        model = model.to("cuda:0")
+    prepare_layers(torch, model.model.layers, profile.steering_layers[0], args.compile, profile.gradient_checkpointing)
+    return model, turns
 
 
 def close_worker() -> None:
@@ -426,24 +469,22 @@ def worker(name: str, experts, args, ready) -> None:
     if args.sampler == "vllm":
         prepare_environment()
     import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoTokenizer
 
+    profile = get_profile(args.profile)
+    model_width(profile)  # Stops here if the folder is not this profile's model.
     if torch.cuda.device_count() != 1:
         raise RuntimeError("Worker must see exactly one card")
     bus = getattr(torch.cuda.get_device_properties(0), "pci_bus_id", None)
     if bus is not None and bus != spec["bus"]:
         raise RuntimeError(f"Wrong card: bus {bus}, expected {spec['bus']}")
     torch.manual_seed(SEED)
-    tokenizer = AutoTokenizer.from_pretrained(MODEL, padding_side="left")
+    tokenizer = AutoTokenizer.from_pretrained(profile.path, padding_side="left")
     eos = {tokenizer.eos_token_id, tokenizer.convert_tokens_to_ids("<|endoftext|>")}
     # vLLM goes first so it takes its share of the card before the PyTorch model and gradient batches.
-    sampler = start_sampler(name, args, eos, torch) if args.sampler == "vllm" else None
-    model = AutoModelForCausalLM.from_pretrained(MODEL, dtype=getattr(torch, args.dtype)).to("cuda:0").eval()
-    for weight in model.parameters():
-        weight.requires_grad_(False)
-    if args.compile:
-        compile_layers(torch, model)
-    run = Run(torch, model, tokenizer, eos, tokenizer.pad_token_id, args, name, sampler)
+    sampler = start_sampler(name, args, eos, torch, profile) if args.sampler == "vllm" else None
+    model, turns = load_learner(torch, args, profile, sampler)
+    run = Run(torch, model, tokenizer, eos, tokenizer.pad_token_id, args, name, profile, sampler, turns)
     ready.set()
     while (expert := next_expert(experts)) is not None:
         say(name, took_next_behavior=expert)
@@ -472,8 +513,12 @@ def parse_list(text: str, allowed) -> list[str]:
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", default="pilot")
+    parser.add_argument("--profile", choices=sorted(PROFILES), default=None,
+                        help="Base model. Default: $STEERING_PROFILE, else qwen06b.")
+    parser.add_argument("--vllm-swap", choices=SWAP_MODES, default="sleep",
+                        help="How vLLM leaves the card on turn-taking models. Use restart if sleep fails on this driver.")
     parser.add_argument("--cards", default="main,second")
-    parser.add_argument("--experts", default="engineering,story,teaching")
+    parser.add_argument("--experts", default=",".join(BEHAVIORS))
     parser.add_argument("--dtype", choices=["float16", "float32"], default="float16")
     parser.add_argument("--compile", action="store_true")
     parser.add_argument("--sampler", choices=["hf", "vllm"], default="hf",

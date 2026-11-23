@@ -8,7 +8,7 @@ from types import SimpleNamespace
 try:
     import torch
     from torch import nn
-    from steering import install_steering
+    from steering import SteeringBank, install_steering, resolve_layer_indices
 except ModuleNotFoundError as exc:
     raise unittest.SkipTest("PyTorch is needed for internal transformer tests") from exc
 
@@ -71,6 +71,19 @@ class TestSteering(unittest.TestCase):
         self.assertIsNotNone(bank.vectors[0].grad)
         self.assertIsNone(bank.vectors[1].grad)
         self.assertTrue(all(torch.equal(p, old) for p, old in zip(model.model.parameters(), base_copies)))
+
+
+class TestLargeModelLayers(unittest.TestCase):
+    def test_auto_layers_for_36_layers_are_9_18_27(self):
+        model = SimpleNamespace(model=SimpleNamespace(layers=nn.ModuleList(nn.Identity() for _ in range(36))))
+        self.assertEqual(resolve_layer_indices(model, "auto"), [9, 18, 27])
+
+    def test_bank_holds_any_number_of_experts(self):
+        names = [f"topic{i}" for i in range(8)]
+        bank = SteeringBank(names, (9, 18, 27), 2560)
+        self.assertEqual((len(bank.vectors), bank.vectors[7].shape), (8, torch.Size([3, 2560])))
+        with self.assertRaises(ValueError), bank.choose(8):
+            pass
 
 
 if __name__ == "__main__":

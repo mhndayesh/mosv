@@ -13,7 +13,8 @@ try:
     import torch
     from torch import nn
     from steering import SteeringBank
-    from system import RouterHead, System
+    from model_profiles import PROFILES
+    from system import RouterHead, System, check_parts, load_vectors
 except ModuleNotFoundError as exc:
     raise unittest.SkipTest("PyTorch is needed for the routed inference tests") from exc
 
@@ -214,6 +215,39 @@ class TestSystem(unittest.TestCase):
                            ("story", "engineering", "teaching", "none"), READ_LAYER)
         with self.assertRaises(ValueError):
             System(system.model, FakeTokenizer(), system.bank, wrong, (ids("U:"), ids(":A"), PAD))
+
+
+class TestNExpertsAndModelChecks(unittest.TestCase):
+    def test_eight_experts_route_and_steer(self):
+        names = tuple(f"topic{i}" for i in range(8))
+        model, bank = make_model(), SteeringBank(names, (0, 1, 2), WIDTH)
+        with torch.no_grad():
+            for vector in bank.vectors:
+                vector.copy_(torch.randn_like(vector) * 3)
+        bank.attach(model)
+        router = RouterHead(nn.Linear(WIDTH, 9), torch.zeros(WIDTH), torch.ones(WIDTH), 1.0, 0.0, (*names, "none"),
+                            READ_LAYER)
+        system = System(model, FakeTokenizer(), bank, router, (ids("U:"), ids(":A"), PAD), max_new_tokens=3)
+        answer = system.generate(["hello there"])[0]
+        self.assertIn(answer.route, router.classes)
+        self.assertEqual(answer.text, system.generate_fixed(["hello there"], None if answer.route == "none"
+                                                            else answer.route)[0])
+
+    def saved(self, profile, width):
+        return {"model_id": profile.model_id, "read_layer": profile.read_layer, "mean": torch.zeros(width)}
+
+    def test_parts_from_the_right_model_pass(self):
+        profile = PROFILES["qwen4b"]
+        check_parts(profile, self.saved(profile, 2560), 2560, (9, 18, 27), [torch.zeros(3, 2560)])
+
+    def test_old_router_or_vectors_on_the_new_model_are_refused(self):
+        new, old = PROFILES["qwen4b"], PROFILES["qwen06b"]
+        with self.assertRaisesRegex(ValueError, "Router was trained"):
+            check_parts(new, self.saved(old, 2560), 2560, (9, 18, 27), [torch.zeros(3, 2560)])
+        with self.assertRaisesRegex(ValueError, "layers"):
+            check_parts(new, self.saved(new, 2560), 2560, (7, 14, 21), [torch.zeros(3, 2560)])
+        with self.assertRaisesRegex(ValueError, "width"):
+            check_parts(new, self.saved(new, 2560), 2560, (9, 18, 27), [torch.zeros(3, 1024)])
 
 
 if __name__ == "__main__":

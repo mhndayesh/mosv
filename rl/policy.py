@@ -106,7 +106,51 @@ def build_policy_batch(torch, prompts: list[list[int]], completions: list[list[i
             "targets": torch.tensor(targets, device=device), "owners": torch.tensor(owners, device=device)}
 
 
-def backward_policy_loss(torch, core, head, batch: dict, advantages, norm: float) -> float:
+def compiled_forward(torch, eager):
+    """Compiled for gradient passes. Calls that use a KV cache stay eager, and steering hooks stay outside."""
+    compiled = torch.compile(eager, dynamic=True)
+
+    def forward(*args, **kwargs):
+        uses_cache = kwargs.get("cache") is not None or kwargs.get("past_key_values") is not None
+        return eager(*args, **kwargs) if uses_cache else compiled(*args, **kwargs)
+    return forward
+
+
+def without_gradients(torch, run):
+    """Run the layer body with no graph. A steering hook runs after this, so its vector still gets a gradient."""
+    def forward(*args, **kwargs):
+        with torch.no_grad():
+            return run(*args, **kwargs)
+    return forward
+
+
+def checkpointed(torch, run):
+    """Keep only the layer's input during the forward pass and redo the layer during backward."""
+    from torch.utils.checkpoint import checkpoint
+
+    def forward(*args, **kwargs):
+        hidden = args[0] if args else kwargs.get("hidden_states")
+        uses_cache = kwargs.get("cache") is not None or kwargs.get("past_key_values") is not None
+        if uses_cache or not torch.is_grad_enabled() or not hidden.requires_grad:
+            return run(*args, **kwargs)
+        return checkpoint(run, *args, use_reentrant=False, preserve_rng_state=False, **kwargs)
+    return forward
+
+
+def prepare_layers(torch, layers, first_steered: int, compile_them: bool, use_checkpoint: bool) -> None:
+    """Layers up to the first steered one need no graph. Later ones may be checkpointed."""
+    for index, layer in enumerate(layers):
+        run = compiled_forward(torch, layer.forward) if compile_them else layer.forward
+        if index <= first_steered:
+            layer.forward = without_gradients(torch, run)
+        elif use_checkpoint:
+            layer.forward = checkpointed(torch, run)
+        else:
+            layer.forward = run
+
+
+def backward_policy_loss(torch, core, head, batch: dict, advantages, norm: float,
+                         head_chunk: int = HEAD_CHUNK) -> float:
     """Backprop -A * log p(answer), running the huge output layer in small chunks."""
     hidden = core(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"],
                   use_cache=False).last_hidden_state
@@ -114,8 +158,8 @@ def backward_policy_loss(torch, core, head, batch: dict, advantages, norm: float
     proxy = selected.detach().requires_grad_(True)
     weights = advantages.to(proxy.device, dtype=torch.float32)[batch["owners"]] / norm
     total = 0.0
-    for start in range(0, proxy.shape[0], HEAD_CHUNK):
-        part = range(start, min(start + HEAD_CHUNK, proxy.shape[0]))
+    for start in range(0, proxy.shape[0], head_chunk):
+        part = range(start, min(start + head_chunk, proxy.shape[0]))
         index = torch.tensor(list(part), device=proxy.device)
         log_probs = torch.log_softmax(head(proxy[index]).float(), dim=-1)
         picked = log_probs.gather(1, batch["targets"][index].unsqueeze(1)).squeeze(1)

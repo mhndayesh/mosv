@@ -1,6 +1,6 @@
 """One inference path: read the prompt (steering off), route it, then generate with that expert.
 
-Qwen3-0.6B (float16) + the trained router + the trained vectors, all in one SteeringBank.
+A Qwen3 base model (float16) + the trained router + the trained vectors, all in one SteeringBank.
 The expert is chosen once per request and stays fixed for every token of that answer.
 `none` runs with no expert, so the original model computes the answer.
 """
@@ -14,12 +14,12 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from model_profiles import ModelProfile, get_profile, profile_for_model
 from router.pipeline import StopAtLayer, chat_parts, encode, stop_hook
 from router.train import decide
 from steering import SteeringBank
 
 ROOT = Path(__file__).parent
-ROUTER_PATH = ROOT / "checkpoints" / "router.pt"
 VECTORS_DIR = ROOT / "checkpoints" / "rl_pilot"
 MODEL_ENV = "QWEN_MODEL_PATH"
 NONE = "none"
@@ -138,10 +138,9 @@ class System:
 # ---- loading --------------------------------------------------------------------------------
 
 def resolve_model_path(model_path: str | None, model_id: str) -> str:
-    """Explicit path, then $QWEN_MODEL_PATH, then the WSL path used in training if it exists, then the hub id."""
-    from router.pipeline import MODEL as WSL_PATH
-
-    for candidate in (model_path, os.environ.get(MODEL_ENV), WSL_PATH):
+    """Explicit path, then $QWEN_MODEL_PATH, then this model's WSL snapshot if it exists, then the hub id."""
+    known = profile_for_model(model_id)
+    for candidate in (model_path, os.environ.get(MODEL_ENV), known.path if known else None):
         if candidate and Path(candidate).exists():
             return candidate
     if model_path or os.environ.get(MODEL_ENV):
@@ -179,17 +178,31 @@ def build_bank(experts: tuple[str, ...], layers: tuple[int, ...], vectors: list,
     return bank.to(device)
 
 
-def load_system(model_path: str | None = None, run: str = "pilot_final", router_path: Path = ROUTER_PATH,
-                vectors_dir: Path = VECTORS_DIR, max_new_tokens: int = MAX_NEW_TOKENS) -> System:
+def check_parts(profile: ModelProfile, saved: dict, width: int, layers: tuple[int, ...], vectors: list) -> None:
+    """Router and vectors must come from this model. A mismatch would otherwise steer the wrong layers."""
+    if saved["model_id"] != profile.model_id or int(saved["read_layer"]) != profile.read_layer:
+        raise ValueError(f"Router was trained on {saved['model_id']} layer {saved['read_layer']}, "
+                         f"not {profile.model_id} layer {profile.read_layer}")
+    if tuple(layers) != profile.steering_layers:
+        raise ValueError(f"Vectors use layers {layers}, {profile.name} steers {profile.steering_layers}")
+    if saved["mean"].numel() != width or any(vector.shape[-1] != width for vector in vectors):
+        raise ValueError(f"Router or vector width does not match the model width {width}")
+
+
+def load_system(model_path: str | None = None, run: str = "pilot_final", router_path: Path | None = None,
+                vectors_dir: Path = VECTORS_DIR, max_new_tokens: int = MAX_NEW_TOKENS,
+                profile: str | None = None) -> System:
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
+    chosen = get_profile(profile)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    router, saved = load_router(router_path, device)
+    router, saved = load_router(router_path or chosen.router_checkpoint, device)
     path = resolve_model_path(model_path, saved["model_id"])
     tokenizer = AutoTokenizer.from_pretrained(path, padding_side="left")
     model = AutoModelForCausalLM.from_pretrained(path, dtype=torch.float16).to(device).eval()
     experts = router.classes[:-1]
     vectors, layers = load_vectors(run, experts, vectors_dir)
+    check_parts(chosen, saved, model.config.hidden_size, layers, vectors)
     bank = build_bank(experts, layers, vectors, device)
     bank.attach(model)
     return System(model, tokenizer, bank, router, chat_parts(path), max_new_tokens)

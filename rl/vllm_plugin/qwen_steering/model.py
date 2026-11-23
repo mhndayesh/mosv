@@ -5,7 +5,7 @@ from functools import partial
 import torch
 from vllm.model_executor.models.qwen3 import Qwen3ForCausalLM
 
-from . import LAYERS
+from . import steering_layers
 
 
 def steered_forward(original, layer, positions, hidden_states, residual=None):
@@ -17,7 +17,7 @@ class SteeredQwen3ForCausalLM(Qwen3ForCausalLM):
     def __init__(self, *, vllm_config, prefix: str = ""):
         super().__init__(vllm_config=vllm_config, prefix=prefix)
         width = self.config.hidden_size
-        for index in LAYERS:
+        for index in steering_layers(self.config):
             layer = self.model.layers[index]
             weight = next(layer.parameters())
             layer.register_buffer("steering_delta", torch.zeros(width, dtype=weight.dtype, device=weight.device),

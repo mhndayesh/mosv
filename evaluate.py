@@ -1,7 +1,7 @@
 """Held-out check of the whole path: router + vectors against the oracle expert and the unsteered model.
 
-Run: python evaluate.py --run pilot_final [--model PATH] [--limit 20] [--out report.json]
-Cases: data_review/rl/<behavior>_test.jsonl plus `none` prompts (split `test`) from the router prompts.
+Run: python evaluate.py --run pilot_final [--profile qwen4b] [--model PATH] [--limit 20] [--out report.json]
+Cases: each behavior's test split plus `none` prompts (split `test`) from the profile's router prompts.
 """
 
 from __future__ import annotations
@@ -11,16 +11,14 @@ import json
 from pathlib import Path
 
 from behaviors.rubrics import score_response
-from rl.data import BEHAVIORS, read_split
+from model_profiles import PROFILES, get_profile
+from rl.data import read_split
 from system import MAX_NEW_TOKENS, NONE, load_system
 
-ROOT = Path(__file__).parent
-ROUTER_PROMPTS = ROOT / "data_review" / "router" / "prompts.jsonl"
 
-
-def load_cases(limit: int | None) -> list[dict]:
-    cases = [{"label": b, "prompt": row["prompt"]} for b in BEHAVIORS for row in read_split(b, "test")[:limit]]
-    with ROUTER_PROMPTS.open(encoding="utf-8") as file:
+def load_cases(limit: int | None, behaviors: tuple[str, ...], prompts_path: Path) -> list[dict]:
+    cases = [{"label": b, "prompt": row["prompt"]} for b in behaviors for row in read_split(b, "test")[:limit]]
+    with prompts_path.open(encoding="utf-8") as file:
         rows = [json.loads(line) for line in file]
     cases += [{"label": NONE, "prompt": r["text"]} for r in rows if r["split"] == "test" and r["label"] == NONE][:limit]
     return cases
@@ -56,7 +54,7 @@ def evaluate_none(system, cases: list[dict]) -> dict:
 
 
 def summarize(per_behavior: dict, none_result: dict) -> dict:
-    scored = [per_behavior[b] for b in BEHAVIORS if per_behavior[b]["n"]]
+    scored = [result for result in per_behavior.values() if result["n"]]
     total = sum(r["n"] for r in scored)
 
     def pooled(key):
@@ -74,11 +72,13 @@ def summarize(per_behavior: dict, none_result: dict) -> dict:
 
 
 def main(args) -> None:
-    system = load_system(args.model, args.run, max_new_tokens=args.max_new_tokens)
-    cases = load_cases(args.limit)
-    by_label = {b: [c for c in cases if c["label"] == b] for b in (*BEHAVIORS, NONE)}
+    profile = get_profile(args.profile)
+    system = load_system(args.model, args.run, max_new_tokens=args.max_new_tokens, profile=profile.name)
+    behaviors = system.bank.expert_names  # The experts this router and these vectors were trained for.
+    cases = load_cases(args.limit, behaviors, profile.router_folder / "prompts.jsonl")
+    by_label = {b: [c for c in cases if c["label"] == b] for b in (*behaviors, NONE)}
     per_behavior = {}
-    for behavior in BEHAVIORS:
+    for behavior in behaviors:
         per_behavior[behavior] = evaluate_behavior(system, behavior, by_label[behavior], args.max_new_tokens)
         print(behavior, json.dumps(per_behavior[behavior]), flush=True)
     none_result = evaluate_none(system, by_label[NONE])
@@ -92,7 +92,8 @@ def main(args) -> None:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--run", default="pilot_final")
-    ap.add_argument("--model", default=None, help="Qwen3-0.6B folder (else $QWEN_MODEL_PATH, the WSL path, or the hub cache)")
+    ap.add_argument("--profile", choices=sorted(PROFILES), default=None, help="Base model (else $STEERING_PROFILE, else qwen06b)")
+    ap.add_argument("--model", default=None, help="Model folder (else $QWEN_MODEL_PATH, the profile's WSL path, or the hub cache)")
     ap.add_argument("--limit", type=int, default=None, help="max prompts per behavior and for none")
     ap.add_argument("--max-new-tokens", type=int, default=MAX_NEW_TOKENS)
     ap.add_argument("--out", default=None, help="also write the report as JSON here")

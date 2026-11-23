@@ -5,6 +5,7 @@ prompts A -> builders -> input queue A -> main card   --\\
 prompts B -> builders -> input queue B -> second card --/
 
 Run in WSL: python -m router.pipeline
+For another model or topic set: STEERING_PROFILE=qwen4b STEERING_TOPICS=v2 python -m router.pipeline
 Each prompt belongs to exactly one card. Finished batches are saved at once, so
 a stopped run resumes. Training only uses the full set after an exactly-once audit.
 """
@@ -22,15 +23,14 @@ from pathlib import Path
 
 import numpy as np
 
+from model_profiles import get_profile, model_width
 from router import CLASSES
 
-ROOT = Path(__file__).parent.parent
-PROMPTS = ROOT / "data_review" / "router" / "prompts.jsonl"
-CACHE = ROOT / "data_review" / "router" / "features"
-MODEL = ("/mnt/c/Users/mhnda/.cache/huggingface/hub/models--Qwen--Qwen3-0.6B/"
-         "snapshots/c1899de289a04d12100db370d81485cdf75e47ca")
-READ_LAYER = 7
-WIDTH = 1024
+PROFILE = get_profile()  # Child processes inherit $STEERING_PROFILE, so every stage reads the same model.
+PROMPTS = PROFILE.router_folder / "prompts.jsonl"
+CACHE = PROFILE.router_folder / "features"
+MODEL = PROFILE.path
+READ_LAYER = PROFILE.read_layer
 BATCH_SIZE = 128
 MAX_BODY_TOKENS = 160
 INPUT_DEPTH = 8
@@ -194,9 +194,9 @@ def gpu_worker(name, spec, inputs, results, beat, ready, abort) -> None:
         raise
 
 
-def check_result(result: dict) -> None:
+def check_result(result: dict, width: int) -> None:
     features, ids = result["features"], result["ids"]
-    if features.shape != (len(ids), WIDTH):
+    if features.shape != (len(ids), width):
         raise ValueError(f"{result['batch_id']}: bad shape {features.shape}")
     if not np.isfinite(features).all():
         raise ValueError(f"{result['batch_id']}: non-finite features")
@@ -211,11 +211,11 @@ def save_chunk(result: dict, cache: Path) -> None:
     os.replace(temp, cache / f"{result['batch_id']}.npz")
 
 
-def record_worker(results, stream, cache, cpu, abort) -> None:
+def record_worker(results, stream, cache, cpu, width, abort) -> None:
     os.sched_setaffinity(0, [cpu])
     try:
         while (result := get_or_abort(results, abort)) is not None:
-            check_result(result)
+            check_result(result, width)
             save_chunk(result, cache)
             keep = [i for i, split in enumerate(result["splits"]) if split == "train"]
             if keep:
@@ -272,6 +272,7 @@ class Supervisor:
         self.beats = {name: self.ctx.Value("d", time.time()) for name in PIPELINES}
         self.ready = {name: self.ctx.Event() for name in PIPELINES}
         self.parts = chat_parts()
+        self.width = model_width(PROFILE)
         self.builders, self.gpus, self.records, self.trainer = {}, {}, [], None
         for name, plan in plans.items():
             for task in plan:
@@ -286,7 +287,8 @@ class Supervisor:
         from router.train import trainer
 
         for cpu in RECORD_CPUS:
-            self.records.append(self.ctx.Process(target=record_worker, args=(self.results, self.stream, CACHE, cpu, self.abort)))
+            self.records.append(self.ctx.Process(target=record_worker, args=(
+                self.results, self.stream, CACHE, cpu, self.width, self.abort)))
             self.records[-1].start()
         self.trainer = self.ctx.Process(target=trainer, args=(self.stream, self.audit_ok, self.abort, PIPELINES["main"]["card"]))
         self.trainer.start()

@@ -12,18 +12,22 @@ from router.dataset import (
     check_rows, is_clean_none, is_near_miss, make_row, render,
 )
 from router.pipeline import MAX_BODY_TOKENS, check_result, encode, load_audited, plan_batches, save_chunk
-from router.train import decide, false_steer_rate, pick_threshold, safety, safety_pass
+from router.train import decide, false_steer_rate, new_router, pick_threshold, safety, safety_pass
+
+
+WIDTH = 2560  # Any model width must work.
 
 
 def rows(count=10):
-    return [{"id": f"id{i:03d}", "split": "train", "label": CLASSES[i % 4], "group": f"g{i}", "text": "x" * (i + 1)}
+    return [{"id": f"id{i:03d}", "split": "train", "label": CLASSES[i % len(CLASSES)], "group": f"g{i}",
+             "text": "x" * (i + 1)}
             for i in range(count)]
 
 
 def result(batch_id, items):
     return {"batch_id": batch_id, "ids": [r["id"] for r in items],
             "labels": [CLASSES.index(r["label"]) for r in items], "splits": [r["split"] for r in items],
-            "features": np.ones((len(items), 1024), dtype=np.float32)}
+            "features": np.ones((len(items), WIDTH), dtype=np.float32)}
 
 
 class TestPlan(unittest.TestCase):
@@ -71,7 +75,7 @@ class TestAudit(unittest.TestCase):
     def test_complete_set_passes(self):
         save_chunk(result("a", self.rows[:4]), self.cache)
         save_chunk(result("b", self.rows[4:]), self.cache)
-        self.assertEqual(load_audited(self.rows, self.cache)["train"][0].shape, (8, 1024))
+        self.assertEqual(load_audited(self.rows, self.cache)["train"][0].shape, (8, WIDTH))
 
     def test_missing_prompt_fails(self):
         save_chunk(result("a", self.rows[:7]), self.cache)
@@ -86,7 +90,7 @@ class TestAudit(unittest.TestCase):
 
     def test_wrong_label_fails(self):
         bad = result("a", self.rows)
-        bad["labels"][0] = (bad["labels"][0] + 1) % 4
+        bad["labels"][0] = (bad["labels"][0] + 1) % len(CLASSES)
         save_chunk(bad, self.cache)
         with self.assertRaisesRegex(ValueError, "mismatch"):
             load_audited(self.rows, self.cache)
@@ -95,20 +99,35 @@ class TestAudit(unittest.TestCase):
         bad = result("a", self.rows)
         bad["features"][0, 0] = np.nan
         with self.assertRaisesRegex(ValueError, "non-finite"):
-            check_result(bad)
+            check_result(bad, WIDTH)
+
+    def test_wrong_model_width_rejected(self):
+        with self.assertRaisesRegex(ValueError, "bad shape"):
+            check_result(result("a", self.rows), 1024)
 
 
 class TestDecision(unittest.TestCase):
     def test_low_confidence_becomes_none(self):
         probabilities = np.array([[0.9, 0.05, 0.03, 0.02], [0.4, 0.3, 0.2, 0.1]])
-        self.assertEqual(decide(probabilities, 0.6).tolist(), [0, NONE_INDEX])
+        self.assertEqual(decide(probabilities, 0.6, 3).tolist(), [0, 3])
+
+    def test_decide_works_for_nine_classes(self):
+        probabilities = np.full((2, 9), 0.01)
+        probabilities[0, 7], probabilities[1, 2] = 0.92, 0.3
+        self.assertEqual(decide(probabilities, 0.6, 8).tolist(), [7, 8])
+
+    def test_router_width_and_classes_follow_the_data(self):
+        import torch
+
+        router = new_router(torch, "cpu", WIDTH)
+        self.assertEqual((router.in_features, router.out_features), (WIDTH, len(CLASSES)))
 
     def test_false_steer_counts_only_none_prompts(self):
-        self.assertEqual(false_steer_rate(np.array([0, 3, 1]), np.array([0, 3, 3])), 0.5)
+        self.assertEqual(false_steer_rate(np.array([0, 3, 1]), np.array([0, 3, 3]), 3), 0.5)
 
     def test_safety_counts_miss_separately_from_wrong(self):
         labels = np.array([0, 0, 1, 2, NONE_INDEX, NONE_INDEX])
-        choices = np.array([0, NONE_INDEX, 2, 2, NONE_INDEX, 1])
+        choices = np.array([0, NONE_INDEX, 2, 2, NONE_INDEX, 1])  # Works for any class count.
         result = safety(choices, labels)
         self.assertEqual((result["correct_steers"], result["missed_left_unchanged"]), (2, 1))
         self.assertEqual((result["wrong_expert"], result["false_steer"]), (1, 1))
@@ -124,7 +143,9 @@ class TestDecision(unittest.TestCase):
         self.assertFalse(safety_pass(safety(wrong, labels), 0.0, 0.0)["wrong_expert"])
 
     def test_threshold_blocks_confident_wrong_steer(self):
-        probabilities = np.array([[0.7, 0.1, 0.1, 0.1], [0.1, 0.1, 0.1, 0.7], [0.95, 0.03, 0.01, 0.01]])
+        size = len(CLASSES)
+        probabilities = np.full((3, size), 0.01 / size)
+        probabilities[0, 0], probabilities[1, NONE_INDEX], probabilities[2, 0] = 0.7, 0.7, 0.95
         labels = np.array([NONE_INDEX, NONE_INDEX, 0])
         threshold = pick_threshold(probabilities, labels)
         self.assertEqual(false_steer_rate(decide(probabilities, threshold), labels), 0.0)

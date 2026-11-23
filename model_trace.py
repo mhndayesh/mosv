@@ -14,6 +14,7 @@ from pathlib import Path
 
 import torch
 
+from model_profiles import PROFILES
 from system import NONE, System, load_system
 
 TRACE_DIR = Path(__file__).parent / "data_review" / "traces"
@@ -116,7 +117,7 @@ def print_record(record: dict) -> None:
 
 
 def main(args) -> None:
-    system = load_system(args.model, args.run, max_new_tokens=args.max_new_tokens)
+    system = load_system(args.model, args.run, max_new_tokens=args.max_new_tokens, profile=args.profile)
     TRACE_DIR.mkdir(parents=True, exist_ok=True)
     path = TRACE_DIR / f"{args.run}.jsonl"
     with path.open("w", encoding="utf-8") as file:
@@ -131,6 +132,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", default="vllm_full")
     parser.add_argument("--model", default=None)
+    parser.add_argument("--profile", choices=sorted(PROFILES), default=None, help="Base model (else $STEERING_PROFILE)")
     parser.add_argument("--prompt", action="append", help="Repeat to trace your own prompts.")
     parser.add_argument("--max-new-tokens", type=int, default=MAX_NEW_TOKENS)
     main(parser.parse_args())

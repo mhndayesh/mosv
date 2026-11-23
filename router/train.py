@@ -6,15 +6,15 @@ import json
 import os
 import queue
 import time
-from pathlib import Path
 
 import numpy as np
 
+from model_profiles import get_profile
 from router import CLASSES, NONE_INDEX
 
-ROOT = Path(__file__).parent.parent
-REPORT = ROOT / "data_review" / "router" / "report.json"
-CHECKPOINT = ROOT / "checkpoints" / "router.pt"
+PROFILE = get_profile()
+REPORT = PROFILE.router_folder / "report.json"
+CHECKPOINT = PROFILE.router_checkpoint
 WARMUP_PER_CLASS = 64
 STREAM_PER_CLASS = 16
 LEARNING_RATE = 0.01
@@ -85,8 +85,8 @@ def calibration_error(probabilities: np.ndarray, labels: np.ndarray, bins: int =
     return round(float(total), 4)
 
 
-def new_router(torch, device):
-    return torch.nn.Linear(1024, len(CLASSES)).to(device)
+def new_router(torch, device, width: int):
+    return torch.nn.Linear(width, len(CLASSES)).to(device)
 
 
 def stream_phase(torch, stream, abort, device) -> dict:
@@ -111,7 +111,7 @@ def stream_phase(torch, stream, abort, device) -> dict:
         if model is None and all(len(pool) >= WARMUP_PER_CLASS for pool in pools):
             sample = torch.from_numpy(np.stack([v for pool in pools for v in pool])).to(device)
             mean, std = sample.mean(0), sample.std(0).clamp_min(1e-6)
-            model = new_router(torch, device)
+            model = new_router(torch, device, sample.shape[1])
             optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-3)
         while model is not None and all(len(pool) >= STREAM_PER_CLASS for pool in pools):
             vectors, labels = [], []
@@ -133,7 +133,7 @@ def fit(torch, train, val, mean, std, weight_decay, device, start_state=None) ->
     xv, yv = ((torch.from_numpy(val[0]).to(device) - mean) / std, torch.from_numpy(val[1]).to(device))
     counts = torch.bincount(y, minlength=len(CLASSES)).float()
     weights = counts.sum() / (len(CLASSES) * counts)
-    model = new_router(torch, device)
+    model = new_router(torch, device, x.shape[1])
     if start_state is not None:
         model.load_state_dict(start_state)
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=weight_decay)
@@ -173,7 +173,7 @@ def fit_temperature(torch, logits, labels) -> float:
 
 
 def probabilities(torch, result, features, temperature, device) -> np.ndarray:
-    model = new_router(torch, device)
+    model = new_router(torch, device, features.shape[1])
     model.load_state_dict(result["state"])
     x = (torch.from_numpy(features).to(device) - result["mean"]) / result["std"]
     with torch.no_grad():
@@ -198,7 +198,7 @@ def choose_router(torch, online, data, device) -> tuple[dict, dict]:
 
 def evaluate(torch, best, data, device) -> tuple[dict, float, float]:
     val_x, val_y, _ = data["val"]
-    model = new_router(torch, device)
+    model = new_router(torch, device, val_x.shape[1])
     model.load_state_dict(best["state"])
     tune_x, tune_y, _ = data["tune"]
     held_x, held_y = np.concatenate([val_x, tune_x]), np.concatenate([val_y, tune_y])
@@ -257,7 +257,8 @@ def trainer(stream, audit_ok, abort, card) -> None:
                   "stream_prompts": online["prompts"], "temperature": round(temperature, 4),
                   "threshold": threshold, "train_seconds": round(time.time() - started, 1), **report}
         CHECKPOINT.parent.mkdir(parents=True, exist_ok=True)
-        torch.save({"classes": list(CLASSES), "read_layer": 7, "model_id": "Qwen/Qwen3-0.6B",
+        torch.save({"classes": list(CLASSES), "read_layer": PROFILE.read_layer, "model_id": PROFILE.model_id,
+                    "profile": PROFILE.name,
                     "state": {k: v.cpu() for k, v in best["state"].items()}, "mean": best["mean"].cpu(),
                     "std": best["std"].cpu(), "temperature": temperature, "threshold": threshold}, CHECKPOINT)
         REPORT.write_text(json.dumps(report, indent=2), encoding="utf-8")

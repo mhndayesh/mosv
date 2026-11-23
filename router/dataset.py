@@ -1,12 +1,14 @@
 """Build balanced router prompts with separate wording for test. RESEARCH USE ONLY.
 
-Run on Windows: python -m router.dataset
+Run on Windows: python -m router.dataset              (the original 3 topics)
+                python -m router.dataset --topics v2  (8 topics from data_review/clean_v2)
 Test prompts use unseen topics AND unseen phrasing, so the router cannot pass by
 memorising one dataset's template.
 """
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
@@ -19,7 +21,7 @@ from pathlib import Path
 import pyarrow.parquet as pq
 
 from behaviors.prepare_data import ADULT, CLEAN, RAW, is_test, norm_key
-from router import CLASSES
+from router import CLASSES, TOPICS_V1, classes_for, resolve_topics
 
 OUT = CLEAN.parent / "router" / "prompts.jsonl"
 REVIEW = CLEAN.parent / "router" / "alpaca_review.json"  # Blind labels for every Alpaca task prompt.
@@ -389,7 +391,8 @@ def is_clean_none(text: str) -> bool:
     return not (TASK_WORDS.search(text) or UNCLEAR_BUILD.search(text) or UNCLEAR_STORY.search(text))
 
 
-def none_rows(texts: list[str], tags: dict) -> list[dict]:
+def none_rows(texts: list[str], tags: dict, train_size: int = PER_CLASS_TRAIN, test_size: int = PER_CLASS_TEST,
+              tune_size: int = TUNE_NONE, skip_test: int = USED_TEST_NONE) -> list[dict]:
     items = [text for text in texts if is_clean_none(text)]
     near = [text for text in texts if tags[text][1]]
     random.Random(f"{SEED}-none").shuffle(items)
@@ -400,25 +403,25 @@ def none_rows(texts: list[str], tags: dict) -> list[dict]:
     near_train = near_fit[:NEAR_MISS_TRAIN]
     hard_train = near_train + writing_fit[:OTHER_WRITING_TRAIN]
     chosen = set(hard_train)
-    train = hard_train + [t for t in plain_fit if t not in chosen][:PER_CLASS_TRAIN - len(hard_train)]
+    train = hard_train + [t for t in plain_fit if t not in chosen][:train_size - len(hard_train)]
     used = set(train)
     tune_near = [t for t in near_fit if is_val(t) and t not in used][:TUNE_NEAR_MISS]
     tune_writing = [t for t in writing_fit if is_val(t) and t not in used][:TUNE_OTHER_WRITING]
     tune_hard = tune_near + tune_writing
     taken = used | set(tune_hard)
-    tune = tune_hard + [t for t in plain_fit if is_val(t) and t not in taken][:TUNE_NONE - len(tune_hard)]
+    tune = tune_hard + [t for t in plain_fit if is_val(t) and t not in taken][:tune_size - len(tune_hard)]
     test = near_held[NEAR_MISS_TEST:2 * NEAR_MISS_TEST]
-    test += plain_held[USED_TEST_NONE:USED_TEST_NONE + PER_CLASS_TEST - len(test)]
+    test += plain_held[skip_test:skip_test + test_size - len(test)]
     rows = [make_row("none", "val" if is_val(t) else "train", t, t) for t in train]
     rows += [make_row("none", "tune", t, t) for t in tune]
     return rows + [make_row("none", "test", t, t) for t in test]
 
 
-def check_rows(rows: list[dict]) -> None:
+def check_rows(rows: list[dict], classes: tuple[str, ...] = CLASSES) -> None:
     ids = [row["id"] for row in rows]
     if len(ids) != len(set(ids)):
         raise ValueError("Duplicate prompt ids")
-    for label in CLASSES:
+    for label in classes:
         groups: dict[str, set] = {}
         for row in rows:
             if row["label"] == label and row["split"] not in ("hard", "final"):
@@ -430,23 +433,114 @@ def check_rows(rows: list[dict]) -> None:
                     raise ValueError(f"{label}: topic shared by {first} and {second}")
 
 
-def main() -> None:
-    texts, rows = alpaca_texts(), []
-    tags = classify_all(texts)
-    for label in ("engineering", "story", "teaching"):
-        natural = alpaca_task_rows(label, texts, tags)
-        rows += natural + task_rows(label, sum(row["split"] != "natural" for row in natural))
-    rows += none_rows(texts, tags)
-    rows += [make_row("none", "hard", text, text) for text in HARD_NEGATIVES]
-    rows += [make_row(label, "final", text, text) for label, items in FINAL_TEST.items() for text in items]
-    check_rows(rows)
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    with OUT.open("w", encoding="utf-8", newline="\n") as file:
+def write_rows(rows: list[dict], out: Path) -> None:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w", encoding="utf-8", newline="\n") as file:
         for row in rows:
             file.write(json.dumps(row, ensure_ascii=False) + "\n")
     counts = Counter((row["split"], row["label"]) for row in rows)
     print(json.dumps({f"{s}/{l}": n for (s, l), n in sorted(counts.items())}, indent=1))
     print("total", len(rows))
+
+
+def build_v1(out: Path) -> None:
+    texts, rows = alpaca_texts(), []
+    tags = classify_all(texts)
+    for label in TOPICS_V1:
+        natural = alpaca_task_rows(label, texts, tags)
+        rows += natural + task_rows(label, sum(row["split"] != "natural" for row in natural))
+    rows += none_rows(texts, tags)
+    rows += [make_row("none", "hard", text, text) for text in HARD_NEGATIVES]
+    rows += [make_row(label, "final", text, text) for label, items in FINAL_TEST.items() for text in items]
+    check_rows(rows, classes_for(TOPICS_V1))
+    write_rows(rows, out)
+
+
+# ---------- the eight-topic set (v2) ----------
+# Topic rows come straight from the cleaned train/dev/test files in data_review/clean_v2, so the group
+# split is already done. `none` is the same Alpaca pool, minus anything that now looks like a topic.
+
+CLEAN_V2 = CLEAN.parent / "clean_v2"
+OUT_V2 = CLEAN.parent / "router_v2" / "prompts.jsonl"
+V2_LIMITS = {"train": 1200, "val": 200, "test": 300}  # per topic; small topics keep everything
+V2_FILES = {"train": "train", "val": "dev", "test": "test"}
+V2_NONE = {"train_size": 3000, "tune_size": 2000, "test_size": 600, "skip_test": 0}  # ~17k clean prompts exist
+V2_LOOKALIKE = re.compile(
+    r"\b(?:e-?mails?|letters?|memo|bugs?|debug\w*|errors?|exceptions?|crash\w*|stack ?trace|traceback|segfault"
+    r"|not working|doesn'?t work|compile\w*|syntax|how to|how do i|how can i|how should i|step[- ]by[- ]step"
+    r"|tutorial|guide|instructions?|recipes?|solve|equation|calculat\w*|compute|probability|percent\w*|average"
+    r"|sum of|product of|how many|how much|simplif\w*|derivative|integral|fractions?|ratio|algebra|geometry"
+    r"|area of|volume of|perimeter|multipl\w*|divid\w*|square root)\b|\d\s*[-+*/x×÷^=]\s*\d"
+    r"|^(?:what|why|how|explain|describe|elaborate|tell me (?:why|how|about))\b", re.IGNORECASE)
+
+
+def looks_like_topic(text: str) -> bool:
+    """Might belong to one of the new topics (email, debugging, math, explanation, how-to)."""
+    return bool(V2_LOOKALIKE.search(text))
+
+
+def topic_text(label: str, split: str, item: dict) -> str:
+    """Reuse the old wording variety for the three old topics; every other prompt stays exactly as written."""
+    fields = body_fields(label, item["prompt"]) if label in TOPICS_V1 else None
+    return render(label, split, fields[0], fields[1], item["id"]) if fields else item["prompt"]
+
+
+def topic_rows_v2(label: str, clean_dir: Path) -> list[dict]:
+    rows = []
+    for split, name in V2_FILES.items():
+        items = sorted(read_jsonl(clean_dir / label / f"{name}.jsonl"), key=lambda r: r["id"])
+        random.Random(f"{SEED}-v2-{label}-{split}").shuffle(items)
+        rows += [make_row(label, split, item["group"], topic_text(label, split, item))
+                 for item in items[:V2_LIMITS[split]]]
+    return rows
+
+
+def none_rows_v2(texts: list[str], tags: dict) -> list[dict]:
+    """Alpaca prompts that are clearly none: drop topic look-alikes, and questions that explain something."""
+    kept = [t for t in texts if not looks_like_topic(t) and not (STORY_ASK.search(t) or ENGINEERING_ASK.search(t)
+                                                                 or TEACHING_ASK.search(t))]
+    rows = none_rows(kept, tags, **V2_NONE)
+    used = {row["text"] for row in rows}
+    near = [t for t in kept if tags[t][1] and is_test(t) and t not in used][:NEAR_MISS_TEST]  # real near-misses
+    hard = [t for t in HARD_NEGATIVES if not looks_like_topic(t)] + near
+    return rows + [make_row("none", "hard", text, text) for text in hard]
+
+
+def check_labels_disjoint(rows: list[dict]) -> None:
+    """One prompt text must never carry two labels."""
+    seen: dict[str, str] = {}
+    for row in rows:
+        if seen.setdefault(norm_key(row["text"]), row["label"]) != row["label"]:
+            raise ValueError(f"Same prompt labeled {seen[norm_key(row['text'])]} and {row['label']}: {row['text'][:80]}")
+
+
+def build_v2(topics: tuple[str, ...], out: Path, clean_dir: Path) -> None:
+    texts, rows = alpaca_texts(), []
+    tags = classify_all(texts)
+    for label in topics:
+        rows += topic_rows_v2(label, clean_dir)
+        if label in TOPICS_V1:  # real, naturally worded Alpaca requests, as in v1 (minus new-topic look-alikes)
+            rows += [r for r in alpaca_task_rows(label, texts, tags) if not looks_like_topic(r["text"])]
+    rows += none_rows_v2(texts, tags)
+    check_rows(rows, classes_for(topics))
+    check_labels_disjoint(rows)
+    write_rows(rows, out)
+    counts = Counter((row["split"], row["label"]) for row in rows)
+    (out.parent / "counts.json").write_text(
+        json.dumps({f"{s}/{l}": n for (s, l), n in sorted(counts.items())}, indent=1), encoding="utf-8")
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--topics", default="v1", help="v1 (default, the original 3 topics), v2, or a comma list")
+    parser.add_argument("--out", type=Path, help="prompts file; default depends on the topic set")
+    parser.add_argument("--clean-dir", type=Path, default=CLEAN_V2, help="cleaned topic folders (v2 only)")
+    args = parser.parse_args(argv)
+    topics = resolve_topics(args.topics)
+    if topics == TOPICS_V1:
+        build_v1(args.out or OUT)
+    else:
+        build_v2(topics, args.out or OUT_V2, args.clean_dir)
 
 
 if __name__ == "__main__":
