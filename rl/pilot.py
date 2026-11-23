@@ -32,7 +32,7 @@ from rl.policy import (
 from rl_math import group_advantages
 from router.pipeline import PIPELINES
 from rl.vllm_sampler import (
-    SWAP_MODES, CardTurns, NoTurns, VllmSampler, WeightShuttle, open_weight_views, prepare_environment,
+    MAX_MODEL_LEN, SWAP_MODES, CardTurns, NoTurns, VllmSampler, WeightShuttle, open_weight_views, prepare_environment,
 )
 
 ROOT = Path(__file__).parent.parent
@@ -341,6 +341,14 @@ def save_best(run: Run, bank, best_vector, optimizer, step: int, best_step: int,
     save_atomic(run.torch, vector_state(run, bank, optimizer, step, expert, best_step=best_step), path)
 
 
+def fitting_rows(run: Run, rows: list[dict]) -> list[dict]:
+    """Keep prompts that leave room for a full answer inside the model length limit."""
+    room = MAX_MODEL_LEN - run.args.max_new
+    encoded = run.tokenizer(chat_texts(run.tokenizer, [row["prompt"] for row in rows]),
+                            add_special_tokens=False)["input_ids"]
+    return [row for row, tokens in zip(rows, encoded) if len(tokens) <= room]
+
+
 def train_expert(run: Run, expert: str) -> dict:
     from steering import SteeringBank
 
@@ -349,7 +357,10 @@ def train_expert(run: Run, expert: str) -> dict:
     report_dir = rl_data.OUT / args.run
     folder.mkdir(parents=True, exist_ok=True)
     report_dir.mkdir(parents=True, exist_ok=True)
-    train, dev, test = (read_split(expert, name) for name in ("routed", "dev", "test"))
+    loaded = [read_split(expert, name) for name in ("routed", "dev", "test")]
+    train, dev, test = (fitting_rows(run, rows) for rows in loaded)
+    say(run.card, expert=expert, too_long_dropped={name: len(before) - len(after) for name, before, after in
+                                                   zip(("train", "dev", "test"), loaded, (train, dev, test))})
     random.Random(SEED).shuffle(train)
     dev, test = dev[:args.dev], test[:args.test]
     bank = SteeringBank([expert], run.profile.steering_layers, run.model.config.hidden_size).to("cuda:0")

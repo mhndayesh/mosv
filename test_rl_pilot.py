@@ -326,6 +326,14 @@ class TestCardMemoryBudgets(unittest.TestCase):
         cuda.set_per_process_memory_fraction.assert_not_called()
 
 
+class TestFittingRows(unittest.TestCase):
+    def test_prompts_without_room_for_a_full_answer_are_dropped(self):
+        run = SimpleNamespace(tokenizer=FakeTokenizer(), args=SimpleNamespace(max_new=256))
+        room = MAX_MODEL_LEN - 256
+        rows = [{"prompt": "a" * room}, {"prompt": "a" * (room + 1)}, {"prompt": "short"}]
+        self.assertEqual(pilot.fitting_rows(run, rows), [rows[0], rows[2]])
+
+
 class TestSeparateCards(unittest.TestCase):
     def test_engine_starts_on_main_card_and_learner_keeps_second(self):
         seen, pins = {}, []
