@@ -74,6 +74,12 @@ class TestVramLimit(unittest.TestCase):
 
 
 class FakeTokenizer:
+    def no_padding(self):
+        pass
+
+    def no_truncation(self):
+        pass
+
     def encode_batch(self, texts, add_special_tokens=False):
         return [type("Item", (), {"ids": [len(text)] * len(text)})() for text in texts]
 

@@ -1,6 +1,5 @@
 import json
 import random
-import shutil
 import sys
 import time
 from pathlib import Path
@@ -13,30 +12,18 @@ sys.path.insert(0, str(ROOT))
 from behaviors.rubrics import score_response
 from evaluate import load_cases
 from model_profiles import get_profile
-from system import NONE, VECTORS_DIR, load_system
+from system import NONE, load_system
 
 RUN = "qwen4b_v2"
 SEED = 7
-TRAINED = ("engineering", "story", "teaching", "debugging", "math_solving", "explanation", "professional_email")
-UNTRAINED = "how_to_guide"
-PER_TOPIC = 6
-PER_NONE = 4
+TRAINED = ("engineering", "story", "teaching", "debugging", "math_solving", "explanation", "professional_email",
+           "how_to_guide")
+PER_TOPIC = 10
+PER_NONE = 6
 MAX_PROMPT_TOKENS = 512
 BATCH = 8
 VRAM_LIMIT_BYTES = 13.5e9
 OUT = ROOT / "data_review" / "reports" / "compare_4b.json"
-VECTORS = ROOT / "checkpoints" / "compare_4b_vectors"
-
-
-def prepare_vectors():
-    """Copy the 7 trained vectors and add an all-zero how-to vector, which leaves the model unchanged."""
-    target = VECTORS / RUN
-    target.mkdir(parents=True, exist_ok=True)
-    for name in TRAINED:
-        shutil.copy(VECTORS_DIR / RUN / f"{name}.pt", target / f"{name}.pt")
-    saved = torch.load(target / f"{TRAINED[0]}.pt", map_location="cpu", weights_only=True)
-    saved["bank"]["vectors.0"] = torch.zeros_like(saved["bank"]["vectors.0"])
-    torch.save(saved, target / f"{UNTRAINED}.pt")
 
 
 def fits(system, prompt):
@@ -67,11 +54,10 @@ def answer_group(system, group, first_id):
 
 
 def main():
-    prepare_vectors()
     total = torch.cuda.get_device_properties(0).total_memory
     torch.cuda.set_per_process_memory_fraction(min(1.0, VRAM_LIMIT_BYTES / total), 0)
     profile = get_profile("qwen4b")
-    system = load_system(None, RUN, vectors_dir=VECTORS, profile="qwen4b")
+    system = load_system(None, RUN, profile="qwen4b")
     chosen = pick(system, load_cases(None, TRAINED, profile.router_folder / "prompts.jsonl"))
     print(json.dumps({"picked": len(chosen)}), flush=True)
     rows = []

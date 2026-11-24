@@ -2,6 +2,7 @@ import json
 import re
 import sys
 from html import escape
+from io import BytesIO
 from pathlib import Path
 
 from reportlab.lib import colors
@@ -24,9 +25,14 @@ SIZES = (10.5, 10, 9.5, 9, 8.5, 8, 7.5, 7, 6.5, 6)
 INK, MUTED, LINE = colors.HexColor("#0F172A"), colors.HexColor("#64748B"), colors.HexColor("#CBD5E1")
 THEMES = {"engineering": ("#1D4ED8", "#EFF6FF"), "story": ("#7C3AED", "#F5F3FF"),
           "teaching": ("#047857", "#ECFDF5"), "debugging": ("#B91C1C", "#FEF2F2"), "math_solving": ("#B45309", "#FFFBEB"), "explanation": ("#0E7490", "#ECFEFF"), "professional_email": ("#BE185D", "#FDF2F8"), "how_to_guide": ("#4D7C0F", "#F7FEE7"), "none": ("#475569", "#F1F5F9")}
-LABELS = {"engineering": "Engineering", "story": "Story", "teaching": "Teaching", "debugging": "Debugging", "math_solving": "Math solving", "explanation": "Explanation", "professional_email": "Professional email", "how_to_guide": "How-to (untrained, no effect)", "none": "Normal prompt"}
+LABELS = {"engineering": "Engineering", "story": "Story", "teaching": "Teaching", "debugging": "Debugging", "math_solving": "Math solving", "explanation": "Explanation", "professional_email": "Professional email", "how_to_guide": "How-to guide", "none": "Normal prompt"}
 TREE = re.compile("[├└│┌┐┘┴┬┼─]")
 dropped = set()
+page_offset = 0
+RESULTS = HERE.parent / "rl_v2" / "qwen4b_v2"
+TOPICS = ("engineering", "story", "teaching", "debugging", "math_solving", "explanation", "professional_email", "how_to_guide")
+SHOWN_SAMPLES = {"WildChat-1M": (1, 2), "LMSYS Chat 1M (clean)": (1, 2), "WritingPrompts": (0, 2),
+                 "Arena preference 140k": (1,), "ShareGPT V3": (1, 2), "no_robots": (0, 2), "Storium-5K": (0, 2)}
 
 
 def register_fonts():
@@ -163,7 +169,7 @@ def index_row(row):
     return [Paragraph(str(row["id"]), center), Paragraph(f'<font color="{color}"><b>{LABELS[row["type"]]}</b></font>', style("i", 8.5, after=0)),
             Paragraph(inline(prompt, "Body"), style("i", 8.5, after=0)), Paragraph(route, center),
             Paragraph(score_text(row["normal_score"]), center), Paragraph(score_text(row["steered_score"]), center),
-            change_cell(row), Paragraph(str(row["id"] + 2), center)]
+            change_cell(row), Paragraph(str(row["id"] + page_offset), center)]
 
 
 def index_page(rows):
@@ -189,6 +195,92 @@ def index_page(rows):
     return [title, note, table, PageBreak()]
 
 
+def grid(data, widths, tinted=True):
+    commands = [("BACKGROUND", (0, 0), (-1, 0), INK), ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LINEBELOW", (0, 0), (-1, -1), 0.35, LINE), ("TOPPADDING", (0, 0), (-1, -1), 3.5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4.5)]
+    if tinted:
+        commands += [("BACKGROUND", (0, i), (-1, i), colors.HexColor("#F8FAFC")) for i in range(2, len(data), 2)]
+    table = Table(data, colWidths=widths, repeatRows=1)
+    table.setStyle(TableStyle(commands))
+    return table
+
+
+def header_row(labels):
+    head = style("h", 9, "BodyB", colors.white, 0)
+    return [Paragraph(label, head) for label in labels]
+
+
+def router_summary():
+    audit = json.loads((HERE / "route_audit.json").read_text(encoding="utf-8"))
+    topics = {name: item for name, item in audit.items() if name != "none"}
+    total = sum(item["prompts"] for item in topics.values())
+    right = sum(item["routes"].get(name, 0) for name, item in topics.items())
+    missed = sum(item["routes"].get("none", 0) for item in topics.values())
+    plain = audit["none"]
+    return (f"<b>Router on all held-out prompts:</b> {right:,} of {total:,} topic prompts got the right vector, "
+            f"{total - right - missed} got a wrong vector, {missed} got no steering. On {plain['prompts']} normal prompts, "
+            f"{plain['prompts'] - plain['routes'].get('none', 0)} were steered by mistake.")
+
+
+def results_page():
+    reports = [json.loads((RESULTS / f"{name}.json").read_text(encoding="utf-8")) for name in TOPICS]
+    reports.sort(key=lambda r: -r["test"]["steered"]["score"])
+    cell = style("r", 10.5, after=0)
+    data = [header_row(["Topic", "Test prompts", "Unsteered", "Random vector", "Trained vector", "Broken answers"])]
+    for r in reports:
+        test = r["test"]
+        data.append([Paragraph(f'<font color="{THEMES[r["expert"]][0]}"><b>{LABELS[r["expert"]]}</b></font>', cell),
+                     Paragraph(str(r["test_prompts"]), cell), Paragraph(f'{test["base"]["score"]:.3f}', cell),
+                     Paragraph(f'{test["random"]["score"]:.3f}', cell), Paragraph(f'<b>{test["steered"]["score"]:.3f}</b>', cell),
+                     Paragraph(f'{test["steered"]["degenerate"]:.1%}', cell)])
+    notes = ["<b>What the score means:</b> the checklist measures structure and process, not truth or writing quality.",
+             "<b>Professional email:</b> treat its score as format only. Its checklist has passed an email that changed the request's purpose.",
+             "<b>Debugging:</b> prompts too long to leave room for a full answer were excluded.",
+             router_summary(),
+             "<b>Router bug fixed in this version:</b> after the first generation, pad tokens leaked into the router's input and sent many debugging prompts to the math vector. The earlier 46-prompt PDF was affected on page 21."]
+    body = style("n", 10, color=colors.HexColor("#334155"), after=5)
+    return [Paragraph("Qwen3-4B steering vectors: final results", style("title", 20, "BodyB", after=4)),
+            Paragraph("All 8 topics, trained on a frozen model and tested on held-out prompts.", style("sub", 11, color=MUTED, after=9)),
+            grid(data, [FRAME_W * share for share in (0.29, 0.13, 0.14, 0.15, 0.15, 0.14)]), Spacer(1, 11),
+            *[Paragraph(note, body) for note in notes], PageBreak()]
+
+
+def clean(text, limit):
+    flat = " ".join(keep_drawable(text, "Body").split())
+    return escape(flat if len(flat) <= limit else flat[:limit - 3] + "...", quote=False)
+
+
+def data_pages():
+    sources = json.loads((HERE / "story_samples.json").read_text(encoding="utf-8"))
+    cell = style("d", 9.2, after=0)
+    data = [header_row(["Source", "Who wrote it", "Rows measured", "Median words", "3+ paragraphs", "Dialogue", "Markdown", "Story checklist"])]
+    for s in sources:
+        data.append([Paragraph(f'<b>{s["source"]}</b>', cell), Paragraph(s["origin"], cell), Paragraph(str(s["measured"]), cell),
+                     Paragraph(str(s["median_words"]), cell), Paragraph(f'{s["pct_3plus_paragraphs"]}%', cell),
+                     Paragraph(f'{s["pct_dialogue"]}%', cell), Paragraph(f'{s["pct_markdown"]}%', cell),
+                     Paragraph(f'{s["story_checklist"]:.2f}', cell)])
+    verdict = ("<b>Do the responses have structure?</b> They have normal writing structure, such as paragraphs, dialogue, verses and script format, "
+               "but <b>not the process structure our checklist rewards</b>. Their story checklist averages are 0.00 to 0.35."
+               "So they are mostly natural text, close to what a model already saw in pretraining. "
+               "<b>We would use the prompts only.</b> The RL loop writes its own answers, so these responses are not training targets. "
+               "Storium's replies are mostly short character descriptions, so its replies are not usable as answers. "
+               "These are small samples of 8 to 60 rows per source, after a safety filter, and a few non-story rows passed the keyword match.")
+    samples = [header_row(["Source", "Real prompt", "Its response (start)"])]
+    small = style("s", 8.4, after=0)
+    for s in sources:
+        for index in SHOWN_SAMPLES[s["source"]]:
+            item = s["samples"][index]
+            samples.append([Paragraph(f'<b>{s["source"]}</b>', small), Paragraph(clean(item["prompt"], 330), small),
+                            Paragraph(clean(item["response"], 520), small)])
+    return [Paragraph("New story data: what we found", style("title", 20, "BodyB", after=4)),
+            Paragraph("Not downloaded yet. Rows below were read from the public dataset viewer.", style("sub", 11, color=MUTED, after=8)),
+            grid(data, [FRAME_W * share for share in (0.2, 0.24, 0.09, 0.09, 0.1, 0.09, 0.09, 0.1)]), Spacer(1, 10),
+            Paragraph(verdict, style("v", 10.2, color=colors.HexColor("#334155"), after=0)), PageBreak(),
+            Paragraph("Sample prompts from each source", style("title", 17, "BodyB", after=7)),
+            grid(samples, [FRAME_W * 0.14, FRAME_W * 0.36, FRAME_W * 0.50]), PageBreak()]
+
+
 def footer(canvas, doc):
     canvas.saveState()
     canvas.setFont("Body", 8)
@@ -198,20 +290,28 @@ def footer(canvas, doc):
     canvas.restoreState()
 
 
+def build(target, rows) -> int:
+    story = results_page() + data_pages() + index_page(rows)
+    for row in rows:
+        story += detail_page(row)
+    story.pop()
+    doc = SimpleDocTemplate(target, pagesize=landscape(A4), leftMargin=MARGIN, rightMargin=MARGIN,
+                            topMargin=MARGIN, bottomMargin=MARGIN + 14, title="Qwen3-4B steering review",
+                            author="llm_steering_rl")
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
+    return doc.page
+
+
 def main():
+    global page_offset
     rows = json.loads((HERE / "compare_4b.json").read_text(encoding="utf-8"))
     out = Path(sys.argv[1])
     out.parent.mkdir(parents=True, exist_ok=True)
     register_fonts()
-    story = index_page(rows)
-    for row in rows:
-        story += detail_page(row)
-    story.pop()
-    doc = SimpleDocTemplate(str(out), pagesize=landscape(A4), leftMargin=MARGIN, rightMargin=MARGIN,
-                            topMargin=MARGIN, bottomMargin=MARGIN + 14, title="Steered vs normal answers",
-                            author="llm_steering_rl")
-    doc.build(story, onFirstPage=footer, onLaterPages=footer)
-    print(json.dumps({"pdf": str(out), "pages": doc.page, "symbols_not_drawable": sorted(dropped)}, ensure_ascii=True))
+    page_offset = build(BytesIO(), rows) - len(rows)  # Each answer has one page, after the opening pages.
+    pages = build(str(out), rows)
+    print(json.dumps({"pdf": str(out), "pages": pages, "first_answer_page": page_offset + 1,
+                      "symbols_not_drawable": len(dropped)}, ensure_ascii=True))
 
 
 if __name__ == "__main__":

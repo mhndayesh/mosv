@@ -334,11 +334,32 @@ def check_resume(state: dict, profile: ModelProfile, path: Path) -> None:
                          f"not {profile.name} layers {list(profile.steering_layers)}. Use a new --run or --fresh.")
 
 
+def finished_best_step(state: dict, updates: int) -> int | None:
+    """A file that finished training already holds its best vector. Keep that update's number on resume."""
+    return state.get("best_step") if state["step"] >= updates else None
+
+
 def save_best(run: Run, bank, best_vector, optimizer, step: int, best_step: int, expert: str, path: Path) -> None:
     """The finished file must hold the best dev vector, because inference loads this file."""
     with run.torch.no_grad():
         bank.vectors[0].copy_(best_vector)
     save_atomic(run.torch, vector_state(run, bank, optimizer, step, expert, best_step=best_step), path)
+
+
+def record_dev(run: Run, bank, optimizer, history: list, result: dict, vector, step: int, base: dict,
+               expert: str, best: tuple) -> tuple:
+    """Log one dev score for `vector`. Returns the best (vector, score, step), rolling back if answers broke."""
+    history.append({"step": step, "dev": result["score"], "degenerate": result["degenerate"],
+                    "on_topic": result["on_topic"]})
+    say(run.card, expert=expert, step=step, dev_steered=result["score"], dev_base=base["score"],
+        degenerate=result["degenerate"], on_topic=result["on_topic"])
+    if result["degenerate"] > base["degenerate"] + MAX_BROKEN_RISE:
+        with run.torch.no_grad():
+            bank.vectors[0].copy_(best[0])
+        optimizer.shrink()
+        say(run.card, expert=expert, step=step, rolled_back_to=best[2], step_scale=optimizer.scale)
+        return best
+    return (vector, result["score"], step) if result["score"] > best[1] else best
 
 
 def fitting_rows(run: Run, rows: list[dict]) -> list[dict]:
@@ -368,13 +389,14 @@ def train_expert(run: Run, expert: str) -> dict:
     norms, typical = activation_norms(run, train)
     caps = typical * args.cap_fraction
     optimizer = make_optimizer(run, bank.vectors[0], norms)
-    path, step, history = folder / f"{expert}.pt", 0, []
+    path, step, history, saved_best = folder / f"{expert}.pt", 0, [], None
     if path.exists() and not args.fresh:
         state = torch.load(path, map_location="cuda:0", weights_only=True)
         check_resume(state, run.profile, path)
         bank.load_state_dict(state["bank"], strict=False)
         optimizer.load_state_dict(state["optimizer"])
         step = state["step"]
+        saved_best = finished_best_step(state, args.updates)
     say(run.card, expert=expert, start_step=step, optimizer=args.optimizer, sampler=args.sampler,
         eval_engine=args.sampler,
         activation_norms=[round(float(v), 2) for v in norms], typical_norms=[round(float(v), 2) for v in typical],
@@ -384,7 +406,10 @@ def train_expert(run: Run, expert: str) -> dict:
     say(run.card, expert=expert, dev_base=base_dev["score"], degenerate=base_dev["degenerate"])
     probe = encode(run, [row["prompt"] for row in train[:PROBE_PROMPTS]])
     best_vector, best_score, best_step = bank.vectors[0].detach().clone(), base_dev["score"], step
+    if saved_best is not None:
+        best_step, best_score = saved_best, evaluate(run, bank, 0, dev, expert)["score"]
     started = time.time()
+    best = (best_vector, best_score, best_step)
     while step < args.updates:
         rows = [train[(step * args.prompts + i) % len(train)] for i in range(args.prompts)]
         info = policy_step(run, bank, optimizer, caps, rows, expert, probe)
@@ -393,17 +418,9 @@ def train_expert(run: Run, expert: str) -> dict:
         say(run.card, expert=expert, step=step, **info, seconds=round(time.time() - started, 1))
         if step % args.eval_every == 0 or step == args.updates:
             result = evaluate(run, bank, 0, dev, expert)
-            history.append({"step": step, "dev": result["score"], "degenerate": result["degenerate"],
-                            "on_topic": result["on_topic"]})
-            say(run.card, expert=expert, step=step, dev_steered=result["score"], dev_base=base_dev["score"],
-                degenerate=result["degenerate"], on_topic=result["on_topic"])
-            if result["degenerate"] > base_dev["degenerate"] + MAX_BROKEN_RISE:
-                with torch.no_grad():
-                    bank.vectors[0].copy_(best_vector)
-                optimizer.shrink()
-                say(run.card, expert=expert, step=step, rolled_back_to=best_step, step_scale=optimizer.scale)
-            elif result["score"] > best_score:
-                best_vector, best_score, best_step = bank.vectors[0].detach().clone(), result["score"], step
+            best = record_dev(run, bank, optimizer, history, result, bank.vectors[0].detach().clone(), step,
+                              base_dev, expert, best)
+    best_vector, best_score, best_step = best
     save_best(run, bank, best_vector, optimizer, step, best_step, expert, path)
     final = {"base": evaluate(run, bank, None, test, expert), "steered": evaluate(run, bank, 0, test, expert),
              "random": random_control(run, bank, test, expert)}

@@ -13,8 +13,9 @@ at most one expert per request. Research only. The checklists judge process and 
 | 4. Port the pipeline to the new model | Done: PyTorch path runs on 4B |
 | 5. Retrain the router (8 topics + none) | Done: 2,781 test prompts, 2,178 of 2,184 steers correct, 0 wrong expert, 6 false steers, 3 misses |
 | 6. Small GPU test | Done: split-card run, 4 updates, 13.07 GB peak, 0 GPU faults, about 10-12 s per update |
-| 7. Train all 8 vectors | Stopped by a GPU fault at 18:01: 6 topics tested, email trained but untested, how-to not started |
-| 8. Final test, side-by-side PDF, report | Partly done: 4B PDF built and reviewed by the owner on 2026-11-24. Email final test, how-to training and the full router + vectors test are not done |
+| 7. Train all 8 vectors | Done on 2026-11-24: all 8 trained and tested |
+| 8. Final test, side-by-side PDF, report | Done: `data_review/reports/qwen4b_final_review.pdf` (94 pages, 86 side-by-side answers) |
+| 9. Large mixed story dataset | Scouted only: about 50,400 estimated prompts from 8 sources, nothing downloaded |
 
 Topics: engineering, story, teaching, debugging, math solving, explanation, professional email, how-to guide.
 
@@ -52,8 +53,10 @@ Test scores on held-out prompts. The checklist measures structure, not truth or 
 | Debugging | 300 | 0.169 | 0.171 | 0.404 | 0.3% |
 | Engineering | 300 | 0.011 | 0.009 | 0.391 | 0% |
 | Explanation | 300 | 0.040 | 0.045 | 0.374 | 1.7% |
-| Professional email | Not tested | n/a | n/a | Dev only: 0.992 vs 0.405 | Dev: 0% |
-| How-to guide | Not trained | n/a | n/a | n/a | n/a |
+| Professional email | 300 | 0.404 | 0.392 | 1.000 (likely format only) | 0% |
+| How-to guide | 300 | 0.183 | 0.172 | 0.718 | 0% |
+
+Router on all held-out prompts, after the padding fix: 6,823 of 6,835 topic prompts got the right vector, 0 got a wrong vector, 12 got no steering. On 600 normal prompts, 6 were steered by mistake.
 
 Open items:
 
@@ -61,11 +64,13 @@ Open items:
 - The email dev score of 0.992 is not trustworthy. In the PDF (page 40) the steered email changed a policy update into a meeting request and still scored 1.00, so the checklist likely rewards format.
 - Debugging excludes prompts too long to leave room for a full answer: 840 train, 105 dev, 114 test.
 - The owner read the PDF, but gaming has not been measured across the full test set.
-- The router sent one debugging prompt to the math vector (PDF page 21), although its earlier test reported 0 wrong experts. The reason is unknown.
+- Fixed: after the first generation, padding stayed on in the shared tokenizer and put pad tokens into the router's input. This caused the debugging-to-math errors in the first PDF. Older 0.6B router numbers from `evaluate.py` may be affected.
+- Tested and removed: running dev scoring in the same vLLM queue as training answers saved no measurable time (about 24 s against 22-27 s).
+- Story data samples: found responses have normal writing structure but score only 0.00-0.35 on the story checklist, so use the prompts only.
 - Knowledge retention is untested: no factual-accuracy check has compared steered and normal answers.
 - The unused vLLM turn-taking code (`CardTurns`, `WeightShuttle`) is still in `rl/vllm_sampler.py`.
 
-Resume the last two topics in WSL. Email skips training and runs its final test:
+Resume or retest a topic in WSL. A finished topic skips training and runs its final test:
 
 ```bash
 cd /mnt/c/projects/llm_steering_rl
@@ -74,11 +79,13 @@ LD_LIBRARY_PATH=$V/lib/python3.12/site-packages/_rocm_sdk_core/lib ROCPROFILER_R
 VLLM_WSL2_ENABLE_PIN_MEMORY=1 VLLM_NO_USAGE_STATS=1 VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
 HF_HUB_OFFLINE=1 STEERING_PROFILE=qwen4b STEERING_TOPICS=v2 \
 $V/bin/python -m rl.pilot --profile qwen4b --run qwen4b_v2 --cards second \
-  --experts professional_email,how_to_guide --sampler vllm --vllm-swap separate --compile \
+  --experts how_to_guide --sampler vllm --vllm-swap separate --compile \
   --updates 86 --prompts 16 --group 4 --max-new 256 --dev 128 --test 300 --eval-every 5
 ```
 
-## Side-by-side review: Qwen3-4B (2026-11-24)
+## First side-by-side review: Qwen3-4B (2026-11-24)
+
+This section describes the first 46-prompt PDF, made before the router fix. The current review is `data_review/reports/qwen4b_final_review.pdf`.
 
 PDF: `data_review/reports/qwen4b_steered_vs_normal.pdf` (gitignored). It shows 46 random held-out prompts, normal answer left and steered answer right: 6 for each of the 7 trained topics, plus 4 normal prompts. How-to is excluded because it has no vector. Prompts over 512 tokens were skipped, answers stop at 256 tokens, and emojis were removed because the PDF font cannot draw them.
 
@@ -151,6 +158,7 @@ Known limits:
 
 | Date | Decision | Why |
 |---|---|---|
+| 2026-11-24 | 4B main-card vLLM budget 10.5 GB | 11.0 reached 14.03 GB and hit the safety stop; 10.0 slowed writing from about 8 s to 14 s; 10.5 ran at about 8.5 s with a 13.15 GB peak |
 | 2026-11-23 | Default vLLM KV cache, not fp8 | fp8 matched PyTorch on 20-32% of steered words; default matched 89-95% |
 | 2026-11-23 | Clear the vLLM prefix cache on every vector change | Cached prompt work otherwise uses the old vector |
 | 2026-11-23 | Cap vectors at 50% of the median token size | Qwen's first token is about 8,200 and inflated the average |

@@ -106,6 +106,8 @@ def chat_parts(model_path: str = MODEL) -> tuple[list[int], list[int], int]:
 
 def encode(tokenizer, texts: list[str], before: list[int], after: list[int], pad_id: int) -> dict:
     """Multicore tokenize, trim only the user text, and pad on the left."""
+    tokenizer.no_padding()  # A padded Hugging Face call leaves these on, which would put pad tokens inside the text.
+    tokenizer.no_truncation()
     rows = [before + item.ids[:MAX_BODY_TOKENS] + after
             for item in tokenizer.encode_batch(texts, add_special_tokens=False)]
     width = max(len(row) for row in rows)

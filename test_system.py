@@ -80,8 +80,21 @@ class Batch(dict):
 
 
 class FakeBackend:
+    """Like the real fast tokenizer: a padded tokenizer call leaves padding switched on here."""
+
+    def __init__(self):
+        self.padded = False
+
+    def no_padding(self):
+        self.padded = False
+
+    def no_truncation(self):
+        pass
+
     def encode_batch(self, texts, add_special_tokens=False):
-        return [SimpleNamespace(ids=ids(text)) for text in texts]
+        rows = [ids(text) for text in texts]
+        width = max(map(len, rows)) if self.padded else 0
+        return [SimpleNamespace(ids=[PAD] * max(width - len(row), 0) + row) for row in rows]
 
 
 def ids(text: str) -> list[int]:
@@ -90,13 +103,16 @@ def ids(text: str) -> list[int]:
 
 class FakeTokenizer:
     padding_side = "right"
-    backend_tokenizer = FakeBackend()
+
+    def __init__(self):
+        self.backend_tokenizer = FakeBackend()
 
     def apply_chat_template(self, messages, tokenize, add_generation_prompt, enable_thinking):
         return "U:" + messages[0]["content"] + ":A"
 
     def __call__(self, texts, padding, return_tensors, add_special_tokens):
         assert self.padding_side == "left"
+        self.backend_tokenizer.padded = bool(padding)
         rows = [ids(t) for t in texts]
         width = max(map(len, rows))
         input_ids = torch.tensor([[PAD] * (width - len(r)) + r for r in rows])
@@ -199,6 +215,13 @@ class TestSystem(unittest.TestCase):
         self.assertTrue(seen and all(value is None for value in seen))
         with system.bank.choose(2):
             self.assertTrue(torch.equal(system._read(list(PROMPTS.values())), clean))
+
+    def test_router_reads_the_same_prompt_after_generation(self):
+        system = make_system()
+        prompts = [PROMPTS["none"], PROMPTS["teaching"] + " with a very long extra tail"]
+        clean = system._read(prompts)
+        system.generate_fixed(prompts, "story", batch_size=2)
+        self.assertTrue(torch.equal(system._read(prompts), clean))
 
     def test_low_confidence_becomes_none(self):
         system = make_system(temperature=1e6)  # Probabilities all near 0.25, under the 0.5 threshold.

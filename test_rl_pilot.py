@@ -454,6 +454,40 @@ class TestCapAndBestVector(unittest.TestCase):
         self.assertEqual((saved["layers"], saved["profile"]), ([9, 18, 27], "qwen4b"))
         self.assertEqual((saved["step"], saved["best_step"]), (86, 40))
 
+    def dev_setup(self):
+        bank = SimpleNamespace(vectors=[torch.full((3, 4), 9.0)])
+        optimizer = mock.Mock()
+        run = SimpleNamespace(card="second", torch=torch)
+        return run, bank, optimizer, (torch.full((3, 4), 2.0), 0.5, 10)
+
+    def test_dev_score_saves_the_vector_that_was_scored(self):
+        run, bank, optimizer, best = self.dev_setup()
+        scored = torch.full((3, 4), 4.0)
+        result = {"score": 0.8, "degenerate": 0.0, "on_topic": 1.0}
+        with mock.patch.object(pilot, "say"):
+            vector, score, step = pilot.record_dev(run, bank, optimizer, [], result, scored, 15, {"score": 0.1, "degenerate": 0.0},
+                                                   "story", best)
+        self.assertTrue((vector == 4.0).all())
+        self.assertEqual((score, step), (0.8, 15))
+        self.assertTrue((bank.vectors[0] == 9.0).all())
+
+    def test_broken_answers_roll_back_to_the_best_vector(self):
+        run, bank, optimizer, best = self.dev_setup()
+        result = {"score": 0.9, "degenerate": 1.0, "on_topic": 1.0}
+        with mock.patch.object(pilot, "say"):
+            kept = pilot.record_dev(run, bank, optimizer, [], result, torch.zeros(3, 4), 15, {"score": 0.1, "degenerate": 0.0},
+                                    "story", best)
+        self.assertIs(kept, best)
+        self.assertTrue((bank.vectors[0] == 2.0).all())
+        optimizer.shrink.assert_called_once()
+
+    def test_resume_keeps_the_best_update_of_a_finished_file(self):
+        self.assertEqual(pilot.finished_best_step({"step": 86, "best_step": 65}, 86), 65)
+
+    def test_resume_of_an_unfinished_file_has_no_saved_best(self):
+        self.assertIsNone(pilot.finished_best_step({"step": 40, "best_step": 30}, 86))
+        self.assertIsNone(pilot.finished_best_step({"step": 86}, 86))  # Stopped before the best was saved.
+
 
 class TestSamplerChoice(unittest.TestCase):
     def test_hugging_face_is_the_default(self):

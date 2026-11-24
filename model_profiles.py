@@ -88,7 +88,7 @@ PROFILES = {
         path=f"{HUB}/models--Qwen--Qwen3-4B-Instruct-2507/snapshots/cdbee75f17c01a7cc42f958dc650907174af0554",
         num_layers=36, steering_layers=(9, 18, 27), read_layer=9,
         router_dir="router_v2", router_file="router_qwen4b.pt", time_share=True,
-        vllm_fraction=0.0, vllm_memory_gb={"main": 11.0, "second": 13.0},  # Main also holds the 2.7 GB desktop.
+        vllm_fraction=0.0, vllm_memory_gb={"main": 10.5, "second": 13.0},  # Main also holds a 2.7-3.1 GB desktop; 11.0 reached 14.03 GB.
         vllm_max_seqs=128, vllm_max_batched_tokens=4096,
         gradient_tokens_vllm={"main": 4000, "second": 8000},
         gradient_tokens_alone={"main": 4000, "second": 8000},
