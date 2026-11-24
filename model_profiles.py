@@ -43,6 +43,7 @@ class ModelProfile:
     torch_vram_gb: Mapping[str, float] = field(default_factory=dict)  # PyTorch's own limit per card.
     generate_cells_by_card: Mapping[str, int] = field(default_factory=dict)  # Overrides generate_cells.
     eval_batch: int = 32  # Prompts per scoring batch with Hugging Face generation.
+    vllm_kv_bytes: Mapping[str, int] = field(default_factory=dict)  # Fixed KV cache per card, so vLLM cannot grow.
 
     def cells(self, card: str) -> int:
         return self.generate_cells_by_card.get(card, self.generate_cells)
@@ -97,6 +98,8 @@ PROFILES = {
         # One 4B copy per card. With these PyTorch limits, 8,000 (main) and 12,000 (second) cells ran out of memory.
         torch_vram_gb={"main": 11.0, "second": 13.5}, generate_cells_by_card={"main": 5000, "second": 8000},
         eval_batch=16,
+        # A budget lets vLLM reserve up to 11.23 GiB, or about 14.5 GiB with Windows apps. A fixed cache cannot grow.
+        vllm_kv_bytes={"main": int(1.30 * 2**30)},
     ),
 }
 

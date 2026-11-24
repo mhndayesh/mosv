@@ -46,6 +46,8 @@ The regex story checklist did not predict human votes (49.6% on 26,298 LitBench 
 - **Selection:** the best vector is the one Haiku prefers most against normal Qwen on dev prompts. If none beats normal, the zero vector is kept.
 - **Logs:** `data_review/rl_v4/<run>/judge_calls.jsonl`. They hold no API key or answer text.
 - **Budget:** $50 hard stop, counted across restarts.
+- **Overlap:** `--overlap` writes the next batch while Haiku and the learner finish the current one. Each gradient is computed at the vector that wrote its batch. Early full-run pace is about 11.5 s per update. It was not compared head to head with the old loop, because the owner stopped that test to save time.
+- **VRAM:** vLLM's KV cache is fixed at 1.30 GiB on the main card because its memory budget could otherwise grow to 11.23 GiB, or about 14.5 GiB with Windows apps. The monitor logs anything above 14 GB and stops only above 15.2 GB or 3 GB shared for 3 checks in a row.
 
 ## Rules for this stage
 

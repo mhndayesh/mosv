@@ -4,6 +4,7 @@ import os
 import queue
 import sys
 import unittest
+from concurrent.futures import Future
 from types import SimpleNamespace
 from unittest import mock
 
@@ -494,6 +495,52 @@ class TestCapAndBestVector(unittest.TestCase):
         self.assertEqual(out[0], [[1], [1]])
         self.assertEqual(out[1], [[5], [6]])
         self.assertEqual(out[3], [0.5, -0.5])
+
+    def test_gradient_runs_at_the_writing_vector_then_returns(self):
+        bank = SimpleNamespace(vectors=[torch.nn.Parameter(torch.full((3, 4), 9.0))])
+        run = SimpleNamespace(torch=torch)
+        with pilot.at_vector(run, bank, torch.full((3, 4), 2.0)):
+            self.assertTrue((bank.vectors[0] == 2.0).all())
+        self.assertTrue((bank.vectors[0] == 9.0).all())
+
+    def test_at_vector_restores_after_an_error(self):
+        bank = SimpleNamespace(vectors=[torch.nn.Parameter(torch.full((3, 4), 9.0))])
+        with self.assertRaises(ValueError):
+            with pilot.at_vector(SimpleNamespace(torch=torch), bank, torch.zeros(3, 4)):
+                raise ValueError("stop")
+        self.assertTrue((bank.vectors[0] == 9.0).all())
+
+    def test_overlap_starts_next_batch_before_learning_with_the_older_vector(self):
+        events = []
+        bank = SimpleNamespace(vectors=[torch.nn.Parameter(torch.full((3, 4), 5.0))])
+        done = Future()
+        done.set_result(([[[1]]], 2.5))
+        job = pilot.WriteJob([{"prompt": "a"}], [[1]], torch.full((3, 4), 1.0), done)
+        next_job = object()
+        run = SimpleNamespace(torch=SimpleNamespace(cuda=SimpleNamespace(reset_peak_memory_stats=lambda: None)),
+                              turns=SimpleNamespace(swap_seconds=0.0))
+
+        def fake_start(_run, _pool, _bank, rows):
+            events.append("write_next")
+            return next_job
+
+        def fake_learn(_run, _bank, _optimizer, _caps, count, _rollouts, _probe, seconds, _swap, vector):
+            events.append("learn")
+            self.assertEqual((count, seconds), (1, 2.5))
+            self.assertTrue((vector == 1.0).all())
+            return {"reward": 1.0}
+
+        with mock.patch.object(pilot, "start_write", fake_start), mock.patch.object(pilot, "written_rollouts", return_value=()), \
+                mock.patch.object(pilot, "learn_step", fake_learn):
+            info, pending = pilot.overlap_step(run, None, bank, None, None, job, [{"prompt": "b"}], "story", None)
+        self.assertEqual(events, ["write_next", "learn"])
+        self.assertIs(pending, next_job)
+        self.assertEqual(info["reward"], 1.0)
+
+    def test_overlap_needs_separate_cards(self):
+        args = SimpleNamespace(vllm_swap="sleep", sampler="vllm", cards="second", overlap=True)
+        with self.assertRaisesRegex(ValueError, "--overlap"):
+            pilot.check_separate_cards(args)
 
     def judged_run(self, rewards):
         judge = mock.Mock()

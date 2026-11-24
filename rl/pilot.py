@@ -17,6 +17,8 @@ import queue
 import random
 import sys
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -339,24 +341,91 @@ def check_vram(run: Run) -> None:
         raise RuntimeError(f"{run.card}: {used:.2f} GB is over the {limit} GB limit")
 
 
-def policy_step(run: Run, bank, optimizer, caps, rows: list[dict], expert: str, probe) -> dict:
-    torch = run.torch
-    swap_before = run.turns.swap_seconds
-    torch.cuda.reset_peak_memory_stats()
+@dataclass
+class WriteJob:
+    rows: list[dict]
+    prompts: list
+    vector: Any  # The exact vector that writes this batch.
+    future: Future
+
+
+def write_answers(sampler, prompts: list, vector) -> tuple[list, float]:
     started = time.time()
-    prompts, completions, rewards, advantages = sample_rollouts(run, bank, rows, expert)
+    sampler.push(vector)
+    return sampler.sample(prompts), time.time() - started
+
+
+def start_write(run: Run, pool, bank, rows: list[dict]) -> WriteJob:
+    """Start vLLM on the next batch. Tokens and the vector are copied here, so the writer thread shares nothing."""
+    prompts = run.tokenizer(chat_texts(run.tokenizer, [row["prompt"] for row in rows]), add_special_tokens=False)["input_ids"]
+    vector = bank.vectors[0].detach().cpu().clone()
+    return WriteJob(rows, prompts, vector, pool.submit(write_answers, run.sampler, prompts, vector))
+
+
+@contextmanager
+def at_vector(run: Run, bank, vector):
+    """Compute the gradient at the vector that wrote the answers, then return to the current vector."""
+    if vector is None:
+        yield
+        return
+    current = bank.vectors[0].detach().clone()
+    with run.torch.no_grad():
+        bank.vectors[0].copy_(vector.to(current.device))
+    try:
+        yield
+    finally:
+        with run.torch.no_grad():
+            bank.vectors[0].copy_(current)
+
+
+def written_rollouts(run: Run, job: WriteJob, sampled: list, expert: str) -> tuple:
+    if getattr(run, "judge", None) is not None:
+        return judged_rollouts(run, job.rows, job.prompts, sampled, expert)
+    out = ([], [], [], [])
+    for row, prompt, answers in zip(job.rows, job.prompts, sampled):
+        add_group(run, expert, row, prompt, answers, out)
+    return out
+
+
+def overlap_step(run: Run, pool, bank, optimizer, caps, job: WriteJob, next_rows: list[dict] | None, expert: str,
+                 probe) -> tuple[dict, WriteJob | None]:
+    """Collect this batch, start writing the next one, then judge and learn while vLLM writes."""
+    swap_before = run.turns.swap_seconds
+    run.torch.cuda.reset_peak_memory_stats()
+    started = time.time()
+    sampled, write_seconds = job.future.result()
+    wait_seconds = time.time() - started
+    next_job = start_write(run, pool, bank, next_rows) if next_rows is not None else None
+    rollouts = written_rollouts(run, job, sampled, expert)
+    info = learn_step(run, bank, optimizer, caps, len(job.rows), rollouts, probe, write_seconds, swap_before, job.vector)
+    return {**info, "write_wait_s": round(wait_seconds, 2)}, next_job
+
+
+def policy_step(run: Run, bank, optimizer, caps, rows: list[dict], expert: str, probe) -> dict:
+    swap_before = run.turns.swap_seconds
+    run.torch.cuda.reset_peak_memory_stats()
+    started = time.time()
+    rollouts = sample_rollouts(run, bank, rows, expert)
+    generate_seconds = time.time() - started - judge_fields(run).get("judge_s", 0.0)
+    return learn_step(run, bank, optimizer, caps, len(rows), rollouts, probe, generate_seconds, swap_before)
+
+
+def learn_step(run: Run, bank, optimizer, caps, row_count: int, rollouts: tuple, probe, generate_seconds: float,
+               swap_before: float, sample_vector=None) -> dict:
+    torch = run.torch
+    prompts, completions, rewards, advantages = rollouts
     judged = judge_fields(run)
-    generate_seconds = time.time() - started - judged.get("judge_s", 0.0)
-    if getattr(run, "judge", None) is not None and len(rewards) < MIN_JUDGED_SHARE * len(rows) * run.args.group:
+    if getattr(run, "judge", None) is not None and len(rewards) < MIN_JUDGED_SHARE * row_count * run.args.group:
         return {"skipped_update": True, "generate_s": round(generate_seconds, 2), **judged}
     generate_peak = torch.cuda.max_memory_allocated() / 1e9
     free_gpu(torch)
     torch.cuda.reset_peak_memory_stats()
     run.turns.for_torch()  # Before the timer, so gradient_s and swap_s do not overlap.
     optimizer.zero_grad(set_to_none=True)
-    norm = len(rows) * run.args.group * run.args.max_new
+    norm = row_count * run.args.group * run.args.max_new
     started = time.time()
-    loss, active = accumulate_gradient(run, bank, prompts, completions, advantages, norm)
+    with at_vector(run, bank, sample_vector):
+        loss, active = accumulate_gradient(run, bank, prompts, completions, advantages, norm)
     gradient_seconds = time.time() - started
     check_vram(run)
     grad_norm, step_kl, rejected = 0.0, 0.0, False
@@ -514,21 +583,33 @@ def train_expert(run: Run, expert: str) -> dict:
         run.judge_update = step
         best_step, best_score = saved_best, dev_result(f"dev_resume_{step}")["score"]
     started = time.time()
-    best, skipped_in_row = (best_vector, best_score, best_step), 0
-    while step < updates:
-        rows = [train[(step * args.prompts + i) % len(train)] for i in range(args.prompts)]
-        run.judge_update = step
-        info = policy_step(run, bank, optimizer, caps, rows, expert, probe)
-        skipped_in_row = skipped_in_row + 1 if info.get("skipped_update") else 0
-        if skipped_in_row >= MAX_SKIPPED_UPDATES:
-            raise RuntimeError(f"{expert}: {skipped_in_row} updates in a row had too few judged prompts")
-        step += 1
-        save_atomic(torch, vector_state(run, bank, optimizer, step, expert), path)
-        say(run.card, expert=expert, step=step, of=updates, **info, seconds=round(time.time() - started, 1))
-        if step % args.eval_every == 0 or step == updates:
-            result = dev_result(f"dev_{step}")
-            best = record_dev(run, bank, optimizer, history, result, bank.vectors[0].detach().clone(), step,
-                              base_dev, expert, best)
+    best, skipped_in_row, pending = (best_vector, best_score, best_step), 0, None
+    rows_at = lambda index: [train[(index * args.prompts + i) % len(train)] for i in range(args.prompts)]
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vllm-writer") if args.overlap else None
+    try:
+        while step < updates:
+            run.judge_update = step
+            if pool is None:
+                info = policy_step(run, bank, optimizer, caps, rows_at(step), expert, probe)
+            else:
+                job = pending or start_write(run, pool, bank, rows_at(step))
+                # Scoring also uses vLLM, so no new batch is started right before a dev check.
+                write_next = step + 1 < updates and (step + 1) % args.eval_every != 0
+                info, pending = overlap_step(run, pool, bank, optimizer, caps, job, rows_at(step + 1) if write_next else None,
+                                             expert, probe)
+            skipped_in_row = skipped_in_row + 1 if info.get("skipped_update") else 0
+            if skipped_in_row >= MAX_SKIPPED_UPDATES:
+                raise RuntimeError(f"{expert}: {skipped_in_row} updates in a row had too few judged prompts")
+            step += 1
+            save_atomic(torch, vector_state(run, bank, optimizer, step, expert), path)
+            say(run.card, expert=expert, step=step, of=updates, **info, seconds=round(time.time() - started, 1))
+            if step % args.eval_every == 0 or step == updates:
+                result = dev_result(f"dev_{step}")
+                best = record_dev(run, bank, optimizer, history, result, bank.vectors[0].detach().clone(), step,
+                                  base_dev, expert, best)
+    finally:
+        if pool is not None:
+            pool.shutdown(wait=True)
     best_vector, best_score, best_step = best
     save_best(run, bank, best_vector, optimizer, step, best_step, expert, path)
     run.judge_update = step
@@ -708,6 +789,7 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cap-fraction", type=float, default=0.50, help="Largest vector, as a share of a typical token.")
     parser.add_argument("--fresh", action="store_true")
     parser.add_argument("--one-pass", action="store_true", help="Run enough updates to see every training prompt once.")
+    parser.add_argument("--overlap", action="store_true", help="Write the next batch while judging and learning this one.")
     parser.add_argument("--judge", choices=["checklist", "haiku"], default="checklist", help="Who scores the answers.")
     parser.add_argument("--judge-budget", type=float, default=50.0, help="Hard stop for this run's Haiku spend, in USD.")
     return parser
@@ -717,6 +799,8 @@ def check_separate_cards(args) -> None:
     """In separate mode one learner on the second card drives the vLLM engine on the main card."""
     if args.vllm_swap == "separate" and (args.sampler != "vllm" or args.cards != "second"):
         raise ValueError("--vllm-swap separate needs --sampler vllm and --cards second")
+    if getattr(args, "overlap", False) and args.vllm_swap != "separate":
+        raise ValueError("--overlap needs vLLM and the learner on separate cards (--vllm-swap separate)")
     if getattr(args, "judge", "checklist") == "haiku" and (args.sampler != "vllm" or args.group > 4):
         raise ValueError("--judge haiku needs --sampler vllm and at most 4 answers per prompt")
 

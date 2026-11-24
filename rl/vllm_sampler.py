@@ -64,6 +64,8 @@ def engine_settings(profile: ModelProfile, card: str, total_bytes: int | None, s
                 "gpu_memory_utilization": profile.vllm_share(card, total_bytes),
                 "max_num_seqs": profile.vllm_max_seqs,
                 "max_num_batched_tokens": profile.vllm_max_batched_tokens}
+    if card in profile.vllm_kv_bytes:  # vLLM still checks the share at startup, so both are set.
+        settings["kv_cache_memory_bytes"] = profile.vllm_kv_bytes[card]
     if profile.time_share and swap == "sleep":
         settings["enable_sleep_mode"] = True
     return settings
