@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
+from rl.judge_rubrics import RUBRICS, system_prompt
 from rl.api_judge import (ApiJudge, BadVerdict, Group, JudgeFatal, build_jobs, combine_rewards, label_rewards, load_api_key,
                           parse_verdict, unique_answers)
 
@@ -174,6 +175,24 @@ class TestBudgetResume(JudgeCase):
             self.assertGreater(judge.spent, 0)
         finally:
             judge.close()
+
+
+class TestTopicRubrics(unittest.TestCase):
+    def test_each_topic_gets_only_its_own_rubric(self):
+        for topic, rubric in RUBRICS.items():
+            prompt = system_prompt(topic)
+            self.assertIn(rubric, prompt)
+            for other, text in RUBRICS.items():
+                if other != topic:
+                    self.assertNotIn(text, prompt)
+
+    def test_request_uses_the_group_topic(self):
+        request = build_jobs([Group("g", "math_solving", "2+2?", ("4", "5"))], 1)[0][0].request
+        self.assertEqual(request["system"][0]["text"], system_prompt("math_solving"))
+
+    def test_unknown_topic_is_refused(self):
+        with self.assertRaises(ValueError):
+            system_prompt("cooking")
 
 
 class TestKeyFile(unittest.TestCase):

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections import Counter
 from pathlib import Path
 
@@ -23,11 +24,20 @@ DEFAULT_SOURCE = ROOT / "data_review" / "rl_v2"
 SPLITS = ("routed", "dev", "test")
 PROMPTS_PER_UPDATE = 16
 EVERYDAY_WORDS = {"strip", "strips", "stripped", "stripping", "moana"}
+# A repeated fan-fiction template implies nudity without using the sexual keywords, sometimes with underage characters.
+NUDITY_TEMPLATE = re.compile(r"\b(?:in the buff|au naturel|skinny[- ]dip\w*|butts?|buttocks|bare[- ]?(?:ass|butt)|"
+                             r"(?:bathe|bathes|bathing|bath|wash\w*|relax\w*) in (?:a|the) pond)\b", re.I)
 
 
 def has_sexual_theme(text: str) -> bool:
     """Keyword hits, ignoring everyday words such as stripping a string or the film Moana."""
     return any(match.group(0).lower() not in EVERYDAY_WORDS for match in SEXUAL.finditer(text))
+
+
+def keep_prompt(topic: str, text: str) -> bool:
+    if is_blocked(text) or has_sexual_theme(text):
+        return False
+    return not (topic == "story" and NUDITY_TEMPLATE.search(text))
 
 
 def problems_in(parts: dict[str, list[dict]]) -> list[str]:
@@ -48,8 +58,7 @@ def problems_in(parts: dict[str, list[dict]]) -> list[str]:
 def prepare_topic(topic: str, out: Path) -> tuple[dict, list[str]]:
     folder = SOURCES.get(topic, DEFAULT_SOURCE)
     loaded = {name: read_split(topic, name, folder) for name in SPLITS}
-    parts = {name: [row for row in rows if not is_blocked(row["prompt"]) and not has_sexual_theme(row["prompt"])]
-             for name, rows in loaded.items()}
+    parts = {name: [row for row in rows if keep_prompt(topic, row["prompt"])] for name, rows in loaded.items()}
     check_separate(parts, topic)
     found = problems_in(parts)
     sexual = sum(has_sexual_theme(row["prompt"]) for part in parts.values() for row in part)

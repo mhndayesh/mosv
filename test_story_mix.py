@@ -4,6 +4,7 @@ import unittest
 
 from behaviors.prepare_story_mix import (MODERATION_BLOCKED, balance_sources, cap_prefixes, clean_one, clean_wp, is_blocked,
                                          is_prose_request, moderation_flagged)
+from rl.prepare_v4 import keep_prompt
 
 
 class TestSafety(unittest.TestCase):
@@ -86,6 +87,14 @@ class TestProseRequests(unittest.TestCase):
     def test_other_formats_are_left_out(self):
         for text in ("Write a poem about the sea", "Write a script about rogue planets", "Compose a sonnet to mint tea"):
             self.assertFalse(is_prose_request(text), text)
+
+
+class TestNudityTemplate(unittest.TestCase):
+    def test_template_is_removed_from_story_only(self):
+        text = "Write a comedic story about two characters who relax in a pond in the buff"
+        self.assertFalse(keep_prompt("story", text))
+        self.assertTrue(keep_prompt("how_to_guide", "How to Make a Butt Joint in Wood"))
+        self.assertTrue(keep_prompt("story", "Write a story about a frog who lives near a pond"))
 
 
 class TestWritingPrompts(unittest.TestCase):
