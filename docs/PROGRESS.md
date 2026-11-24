@@ -15,7 +15,9 @@ at most one expert per request. Research only. The checklists judge process and 
 | 6. Small GPU test | Done: split-card run, 4 updates, 13.07 GB peak, 0 GPU faults, about 10-12 s per update |
 | 7. Train all 8 vectors | Done on 2026-11-24: all 8 trained and tested |
 | 8. Final test, side-by-side PDF, report | Done: `data_review/reports/qwen4b_final_review.pdf` (94 pages, 86 side-by-side answers) |
-| 9. Large mixed story dataset | Scouted only: about 50,400 estimated prompts from 8 sources, nothing downloaded |
+| 9. Large mixed story dataset | Built: 29,364 real prompts in `data_review/clean_v3/story` (23,383 train, 3,017 dev, 2,964 test). Run `qwen4b_story_v3` is next |
+
+Story v3 sources: WritingPrompts 8,809, WildChat 8,809, LMSYS 6,728, ShareGPT 2,215, no_robots 1,476, Arena 922, small human sets 405. Build with `python -m behaviors.prepare_story_mix`. All sexual-themed prompts are removed by keyword from every source, and WildChat's minor-safety moderation flags are applied. Implied content with no matching word can remain. Storium and `E:\Story-Writing` are excluded; the latter uses 4 templates for 93% of rows. About 10% of a 60-row non-WritingPrompts sample was not a clear creative request.
 
 Topics: engineering, story, teaching, debugging, math solving, explanation, professional email, how-to guide.
 
