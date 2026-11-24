@@ -291,6 +291,13 @@ class TestVllmRollouts(unittest.TestCase):
         llm.pushed[1](model)
         self.assertEqual(model.model.layers[7].steering_delta.tolist(), [0.0] * 4)
 
+    def test_zero_vector_means_no_steering(self):
+        run, llm, _ = vllm_run()
+        run.sampler.push(torch.zeros(3, 4))
+        self.assertIsNone(llm.pushed[0].keywords["vectors"])
+        run.sampler.push(torch.ones(3, 4))
+        self.assertIsNotNone(llm.pushed[1].keywords["vectors"])
+
     def test_prompt_too_long_for_the_engine_is_refused(self):
         run, _, _ = vllm_run(max_new=100)
         with self.assertRaisesRegex(ValueError, "exceeds"):
@@ -495,6 +502,31 @@ class TestCapAndBestVector(unittest.TestCase):
         self.assertEqual(out[0], [[1], [1]])
         self.assertEqual(out[1], [[5], [6]])
         self.assertEqual(out[3], [0.5, -0.5])
+
+    def test_looping_check_leaves_code_poems_and_refusals_to_the_judge(self):
+        from behaviors.rubrics import is_looping
+
+        self.assertTrue(is_looping(""))
+        self.assertTrue(is_looping("the same words again and again. " * 30))
+        self.assertFalse(is_looping("I'm sorry, but I can't assist with that request."))
+        self.assertFalse(is_looping("An old silent pond\nA frog jumps into the pond\nSplash, silence again"))
+        code = "\n".join(f"const value{i} = compute(input{i}, offset{i} + {i});" for i in range(30))
+        self.assertFalse(is_looping(code))
+
+    def test_judged_run_ignores_old_broken_flag_but_stops_real_loops(self):
+        bank = SimpleNamespace(vectors=[torch.nn.Parameter(torch.full((3, 4), 9.0))])
+        best = (torch.full((3, 4), 2.0), 0.5, 10)
+        run = SimpleNamespace(card="second", torch=torch, judge=object())
+        base = {"score": 0.5, "degenerate": 0.1, "looping": 0.0}
+        fine = {"score": 0.6, "degenerate": 0.5, "looping": 0.02, "on_topic": 1.0}
+        loops = {"score": 0.7, "degenerate": 0.5, "looping": 0.3, "on_topic": 1.0}
+        optimizer = mock.Mock()
+        with mock.patch.object(pilot, "say"):
+            kept = pilot.record_dev(run, bank, optimizer, [], fine, torch.ones(3, 4), 20, base, "engineering", best)
+            self.assertEqual(kept[1:], (0.6, 20))
+            optimizer.shrink.assert_not_called()
+            self.assertIs(pilot.record_dev(run, bank, optimizer, [], loops, torch.ones(3, 4), 30, base, "engineering", best), best)
+        optimizer.shrink.assert_called_once()
 
     def test_gradient_runs_at_the_writing_vector_then_returns(self):
         bank = SimpleNamespace(vectors=[torch.nn.Parameter(torch.full((3, 4), 9.0))])

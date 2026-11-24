@@ -129,6 +129,8 @@ class VllmSampler:
         add_plugin_path()
         from qwen_steering import set_steering
 
+        if vectors is not None and not vectors.detach().any():
+            vectors = None  # A kept zero vector is the unsteered model, so it takes the exact no-steering path.
         array = None if vectors is None else vectors.detach().float().cpu().numpy()
         self.llm.apply_model(partial(set_steering, vectors=array))
         self.llm.reset_prefix_cache()  # Cached prompt work was computed with the old vector.

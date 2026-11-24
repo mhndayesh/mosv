@@ -215,6 +215,19 @@ def is_degenerate(text: str, repeated: float | None = None) -> bool:
     return bool(repeats) and repeats.most_common(1)[0][1] > MAX_SENTENCE_REPEATS
 
 
+def is_looping(text: str) -> bool:
+    """Empty, repeating or near-random output. Short poems, code and refusals are left for the judge to score."""
+    tokens = text.lower().split()  # Exact tokens, so value1 and value2 in code stay different.
+    if not tokens:
+        return True
+    if len(tokens) < MIN_WORDS:
+        return False
+    grams = [tuple(tokens[i:i + NGRAM]) for i in range(len(tokens) - NGRAM + 1)]
+    lines = [line.strip().lower() for line in text.splitlines() if len(line.split()) >= 3]
+    return len(set(tokens)) / len(tokens) < MIN_UNIQUE_WORD_SHARE \
+        or max(repeat_share(grams), repeat_share(lines)) >= DEGENERATE_REPETITION
+
+
 def first(pattern: re.Pattern, text: str, start: int = 0) -> int | None:
     match = pattern.search(text, start)
     return match.start() if match else None

@@ -47,6 +47,10 @@ The regex story checklist did not predict human votes (49.6% on 26,298 LitBench 
 - **Logs:** `data_review/rl_v4/<run>/judge_calls.jsonl`. They hold no API key or answer text.
 - **Budget:** $50 hard stop, counted across restarts.
 - **Overlap:** `--overlap` writes the next batch while Haiku and the learner finish the current one. Each gradient is computed at the vector that wrote its batch. Early full-run pace is about 11.5 s per update. It was not compared head to head with the old loop, because the owner stopped that test to save time.
+- **Per-topic rubrics:** `rl/judge_rubrics.py`. Each topic has 5 criteria from published guidelines, and Haiku sees only the rubric for the topic it judges. On 20 prompts, normal answers beat shuffled ones 97.5% of the time and wrong-prompt answers 100%.
+- **Mixed training:** `--interleave` shuffles small 8-prompt updates across all 8 topics in one run, about 5.7 s per update. Each topic keeps its own vector, optimizer, best vector and checkpoint. A 24-update GPU test confirmed exact per-topic counts and no carry-over between topics.
+- **Brake:** with Haiku judging, rollbacks only catch empty, looping or near-random output, so code, poems and refusals are left to the judge.
+- **Noise:** about 1 in 4 long greedy answers changes between two identical vLLM runs, so a dev score from 0.45 to 0.55 can be chance.
 - **VRAM:** vLLM's KV cache is fixed at 1.30 GiB on the main card because its memory budget could otherwise grow to 11.23 GiB, or about 14.5 GiB with Windows apps. The monitor logs anything above 14 GB and stops only above 15.2 GB or 3 GB shared for 3 checks in a row.
 
 ## Rules for this stage

@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from behaviors.rubrics import score_response
+from behaviors.rubrics import is_looping, score_response
 from model_profiles import PROFILES, ModelProfile, get_profile, model_width
 from rl import data as rl_data
 from rl.api_judge import ApiJudge, Group
@@ -170,15 +170,17 @@ def evaluate(run: Run, bank, choice, rows: list[dict], expert: str) -> dict:
 
 
 def score_answers(run: Run, ordered: list[dict], answers: list[list[int]], expert: str) -> dict:
-    results, samples = [], []
+    results, samples, looping = [], [], 0
     for row, tokens in zip(ordered, answers):
         text = decode(run, tokens)
         results.append(score_response(expert, text, row["prompt"]))
+        looping += is_looping(text)
         if len(samples) < 3:
             samples.append({"prompt": row["prompt"][:160], "answer": text[:700]})
     names = sorted({name for result in results for name in result.checks})
     return {"score": round(sum(r.score for r in results) / len(results), 4),
             "degenerate": round(sum(r.degenerate for r in results) / len(results), 4),
+            "looping": round(looping / len(results), 4),
             "on_topic": round(sum(r.topic for r in results) / len(results), 4),
             "checks": {name: round(sum(bool(r.checks.get(name)) for r in results) / len(results), 3) for name in names},
             "samples": samples}
@@ -355,10 +357,10 @@ def write_answers(sampler, prompts: list, vector) -> tuple[list, float]:
     return sampler.sample(prompts), time.time() - started
 
 
-def start_write(run: Run, pool, bank, rows: list[dict]) -> WriteJob:
+def start_write(run: Run, pool, bank, rows: list[dict], topic_vector=None) -> WriteJob:
     """Start vLLM on the next batch. Tokens and the vector are copied here, so the writer thread shares nothing."""
     prompts = run.tokenizer(chat_texts(run.tokenizer, [row["prompt"] for row in rows]), add_special_tokens=False)["input_ids"]
-    vector = bank.vectors[0].detach().cpu().clone()
+    vector = (bank.vectors[0] if topic_vector is None else topic_vector).detach().cpu().clone()
     return WriteJob(rows, prompts, vector, pool.submit(write_answers, run.sampler, prompts, vector))
 
 
@@ -513,10 +515,12 @@ def record_dev(run: Run, bank, optimizer, history: list, result: dict, vector, s
                expert: str, best: tuple) -> tuple:
     """Log one dev score for `vector`. Returns the best (vector, score, step), rolling back if answers broke."""
     history.append({"step": step, "dev": result["score"], "degenerate": result["degenerate"],
-                    "on_topic": result["on_topic"]})
+                    "looping": result.get("looping"), "on_topic": result["on_topic"]})
     say(run.card, expert=expert, step=step, dev_steered=result["score"], dev_base=base["score"],
-        degenerate=result["degenerate"], on_topic=result["on_topic"])
-    if result["degenerate"] > base["degenerate"] + MAX_BROKEN_RISE:
+        degenerate=result["degenerate"], looping=result.get("looping"), on_topic=result["on_topic"])
+    # With Haiku judging quality, the brake only catches output that is plainly broken.
+    brake = "looping" if getattr(run, "judge", None) is not None else "degenerate"
+    if result[brake] > base[brake] + MAX_BROKEN_RISE:
         with run.torch.no_grad():
             bank.vectors[0].copy_(best[0])
         optimizer.shrink()
@@ -736,6 +740,14 @@ def worker(name: str, experts, args, ready) -> None:
         judge = ApiJudge(rl_data.OUT / args.run / "judge_calls.jsonl", run=args.run, budget_usd=args.judge_budget, seed=SEED)
     run = Run(torch, model, tokenizer, eos, tokenizer.pad_token_id, args, name, profile, sampler, turns, judge)
     ready.set()
+    if args.interleave:
+        from rl.interleave import train_mixed
+
+        topics = []
+        while (expert := next_expert(experts)) is not None:
+            topics.append(expert)
+        say(name, mixed_topics=topics)
+        train_mixed(run, topics)
     while (expert := next_expert(experts)) is not None:
         say(name, took_next_behavior=expert)
         train_expert(run, expert)
@@ -790,6 +802,7 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fresh", action="store_true")
     parser.add_argument("--one-pass", action="store_true", help="Run enough updates to see every training prompt once.")
     parser.add_argument("--overlap", action="store_true", help="Write the next batch while judging and learning this one.")
+    parser.add_argument("--interleave", action="store_true", help="Shuffle small updates across all topics in one run.")
     parser.add_argument("--judge", choices=["checklist", "haiku"], default="checklist", help="Who scores the answers.")
     parser.add_argument("--judge-budget", type=float, default=50.0, help="Hard stop for this run's Haiku spend, in USD.")
     return parser
@@ -799,6 +812,8 @@ def check_separate_cards(args) -> None:
     """In separate mode one learner on the second card drives the vLLM engine on the main card."""
     if args.vllm_swap == "separate" and (args.sampler != "vllm" or args.cards != "second"):
         raise ValueError("--vllm-swap separate needs --sampler vllm and --cards second")
+    if getattr(args, "interleave", False) and (not args.overlap or args.judge != "haiku"):
+        raise ValueError("--interleave needs --overlap and --judge haiku")
     if getattr(args, "overlap", False) and args.vllm_swap != "separate":
         raise ValueError("--overlap needs vLLM and the learner on separate cards (--vllm-swap separate)")
     if getattr(args, "judge", "checklist") == "haiku" and (args.sampler != "vllm" or args.group > 4):
