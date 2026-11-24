@@ -24,6 +24,7 @@ from typing import Any
 from behaviors.rubrics import score_response
 from model_profiles import PROFILES, ModelProfile, get_profile, model_width
 from rl import data as rl_data
+from rl.api_judge import ApiJudge, Group
 from rl.data import BEHAVIORS, read_split
 from rl.policy import (
     NormalizedMomentum, ShrinkableAdam, backward_policy_loss, build_policy_batch, kl_divergence, prepare_layers,
@@ -44,6 +45,9 @@ PROBE_PROMPTS = 16
 PROBE_TOKENS = 8
 MAX_BROKEN_RISE = 0.10  # Roll back if this many more dev answers break than in unsteered Qwen.
 MAX_GRAD_NORM = 1.0
+MIN_JUDGED_SHARE = 0.5  # With fewer judged prompts, skip the update instead of learning from a thin sample.
+MAX_SKIPPED_UPDATES = 3  # This many skipped updates in a row means the judge is down, so the run stops.
+JUDGE_NEUTRAL_SCORE = 0.5  # Base score on the judged dev set: a tie against the unsteered answer.
 START_GAP_SECONDS = 3
 SEED = 2026
 ENGINE_STOP_SECONDS = 10
@@ -64,6 +68,9 @@ class Run:
     profile: ModelProfile
     sampler: Any = None  # A VllmSampler when --sampler vllm, else None (Hugging Face generation).
     turns: Any = None  # Who holds the card. Every GPU step asks for its turn first.
+    judge: Any = None  # An ApiJudge when --judge haiku, else the regex checklist scores answers.
+    judge_update: int = 0
+    last_judge: Any = None
 
 
 def say(run_card: str, **row) -> None:
@@ -151,10 +158,18 @@ def eval_answers(run: Run, bank, choice, rows: list[dict]) -> list[list[int]]:
     return run.sampler.best_answers(prompts, None if choice is None else bank.vectors[choice])
 
 
+def by_length(rows: list[dict]) -> list[dict]:
+    return sorted(rows, key=lambda row: len(row["prompt"]))
+
+
 def evaluate(run: Run, bank, choice, rows: list[dict], expert: str) -> dict:
+    ordered = by_length(rows)
+    return score_answers(run, ordered, eval_answers(run, bank, choice, ordered), expert)
+
+
+def score_answers(run: Run, ordered: list[dict], answers: list[list[int]], expert: str) -> dict:
     results, samples = [], []
-    ordered = sorted(rows, key=lambda row: len(row["prompt"]))
-    for row, tokens in zip(ordered, eval_answers(run, bank, choice, ordered)):
+    for row, tokens in zip(ordered, answers):
         text = decode(run, tokens)
         results.append(score_response(expert, text, row["prompt"]))
         if len(samples) < 3:
@@ -202,10 +217,76 @@ def sample_rollouts_vllm(run: Run, bank, rows: list[dict], expert: str) -> tuple
     run.sampler.push(bank.vectors[0])
     prompts = run.tokenizer(chat_texts(run.tokenizer, [row["prompt"] for row in rows]),
                             add_special_tokens=False)["input_ids"]  # Same tokens the gradient pass sees.
+    sampled = run.sampler.sample(prompts)
+    if getattr(run, "judge", None) is not None:
+        return judged_rollouts(run, rows, prompts, sampled, expert)
     out = ([], [], [], [])
-    for row, prompt, answers in zip(rows, prompts, run.sampler.sample(prompts)):
+    for row, prompt, answers in zip(rows, prompts, sampled):
         add_group(run, expert, row, prompt, answers, out)
     return out
+
+
+def judged_rollouts(run: Run, rows: list[dict], prompts: list, sampled: list, expert: str) -> tuple:
+    """Haiku scores each prompt's answers. A prompt with no usable verdict is left out of this update."""
+    groups = [Group(f"{expert}:{run.judge_update}:{index}", expert, row["prompt"], tuple(decode(run, tokens) for tokens in answers))
+              for index, (row, answers) in enumerate(zip(rows, sampled))]
+    rewards, stats = run.judge.judge(groups, run.judge_update)
+    run.last_judge = stats.summary()
+    out = ([], [], [], [])
+    for prompt, answers, reward in zip(prompts, sampled, rewards):
+        if reward is not None:
+            for target, values in zip(out, ([prompt] * len(answers), answers, reward, group_advantages(reward))):
+                target += values
+    return out
+
+
+def judge_fields(run: Run) -> dict:
+    stats = getattr(run, "last_judge", None)
+    if stats is None:
+        return {}
+    return {"judge_s": stats["seconds"], "judge_ok": stats["ok"], "judge_retried": stats["retried"],
+            "judge_skipped": stats["skipped"], "judge_cost": stats["cost_usd"], "judge_scored": stats["groups_scored"]}
+
+
+def compare_with_judge(run: Run, ordered: list[dict], answer_sets: dict[str, list], expert: str, tag: str) -> dict | None:
+    """Mean judge reward for each answer set, and how often it beats the unsteered answer."""
+    names = list(answer_sets)
+    groups = [Group(f"{expert}:{tag}:{index}", expert, row["prompt"], tuple(decode(run, answer_sets[name][index]) for name in names))
+              for index, row in enumerate(ordered)]
+    rewards, stats = run.judge.judge(groups, run.judge_update)
+    usable = [reward for reward in rewards if reward is not None]
+    say(run.card, expert=expert, judge_eval=tag, scored=len(usable), of=len(groups), retried=stats.retried,
+        skipped=stats.skipped, cost=round(stats.cost_usd, 5), seconds=round(stats.seconds, 1))
+    if len(usable) < MIN_JUDGED_SHARE * len(groups):
+        return None
+    out = {}
+    for index, name in enumerate(names):
+        wins = sum((reward[index] > reward[0]) + 0.5 * (reward[index] == reward[0]) for reward in usable)
+        out[name] = {"reward": round(sum(reward[index] for reward in usable) / len(usable), 4),
+                     "beats_base_pct": round(100 * wins / len(usable), 1)}
+    return out
+
+
+def judged_dev(run: Run, bank, ordered: list[dict], base_answers: list, expert: str, tag: str) -> dict:
+    answers = eval_answers(run, bank, 0, ordered)
+    result = score_answers(run, ordered, answers, expert)
+    means = compare_with_judge(run, ordered, {"base": base_answers, "steered": answers}, expert, tag)
+    return {**result, "checklist_score": result["score"], "score": means["steered"]["reward"] if means else 0.0, "judge": means}
+
+
+def judged_final(run: Run, bank, rows: list[dict], expert: str) -> dict:
+    ordered = by_length(rows)
+    sets = {"base": eval_answers(run, bank, None, ordered), "steered": eval_answers(run, bank, 0, ordered),
+            "random": random_answers(run, bank, ordered)}
+    means = compare_with_judge(run, ordered, sets, expert, "final_test")
+    if means is None:
+        raise RuntimeError(f"{expert}: the judge scored too few final test prompts")
+    final = {}
+    for name, answers in sets.items():
+        result = score_answers(run, ordered, answers, expert)
+        final[name] = {**result, "checklist_score": result["score"], "score": means[name]["reward"],
+                       "beats_base_pct": means[name]["beats_base_pct"]}
+    return final
 
 
 def sample_rollouts(run: Run, bank, rows: list[dict], expert: str) -> tuple:
@@ -264,7 +345,10 @@ def policy_step(run: Run, bank, optimizer, caps, rows: list[dict], expert: str, 
     torch.cuda.reset_peak_memory_stats()
     started = time.time()
     prompts, completions, rewards, advantages = sample_rollouts(run, bank, rows, expert)
-    generate_seconds = time.time() - started
+    judged = judge_fields(run)
+    generate_seconds = time.time() - started - judged.get("judge_s", 0.0)
+    if getattr(run, "judge", None) is not None and len(rewards) < MIN_JUDGED_SHARE * len(rows) * run.args.group:
+        return {"skipped_update": True, "generate_s": round(generate_seconds, 2), **judged}
     generate_peak = torch.cuda.max_memory_allocated() / 1e9
     free_gpu(torch)
     torch.cuda.reset_peak_memory_stats()
@@ -292,7 +376,7 @@ def policy_step(run: Run, bank, optimizer, caps, rows: list[dict], expert: str, 
             rejected = True
     return {"reward": round(sum(rewards) / len(rewards), 4), "best": round(max(rewards), 4), "active": active,
             "step_kl": round(step_kl, 5), "rejected": rejected, "step_scale": round(optimizer.scale, 4),
-            "generate_s": round(generate_seconds, 2), "gradient_s": round(gradient_seconds, 2),
+            **judged, "generate_s": round(generate_seconds, 2), "gradient_s": round(gradient_seconds, 2),
             "swap_s": round(run.turns.swap_seconds - swap_before, 2),
             "loss": round(loss, 6), "grad_norm": round(grad_norm, 4),
             "tokens": sum(len(c) for c in completions),
@@ -302,17 +386,23 @@ def policy_step(run: Run, bank, optimizer, caps, rows: list[dict], expert: str, 
             "vector_norm": [round(float(v), 3) for v in bank.vectors[0].detach().norm(dim=-1)]}
 
 
-def random_control(run: Run, bank, rows: list[dict], expert: str) -> dict:
+def random_answers(run: Run, bank, ordered: list[dict]) -> list[list[int]]:
+    """Answers from a random vector of the same size as the trained one."""
     torch = run.torch
     saved = bank.vectors[0].detach().clone()
     generator = torch.Generator(device="cuda:0").manual_seed(SEED)
     noise = torch.randn(saved.shape, device="cuda:0", generator=generator, dtype=saved.dtype)
     with torch.no_grad():
         bank.vectors[0].copy_(noise / noise.norm(dim=-1, keepdim=True) * saved.norm(dim=-1, keepdim=True))
-    result = evaluate(run, bank, 0, rows, expert)
+    answers = eval_answers(run, bank, 0, ordered)
     with torch.no_grad():
         bank.vectors[0].copy_(saved)
-    return result
+    return answers
+
+
+def random_control(run: Run, bank, rows: list[dict], expert: str) -> dict:
+    ordered = by_length(rows)
+    return score_answers(run, ordered, random_answers(run, bank, ordered), expert)
 
 
 def save_atomic(torch, state: dict, path: Path) -> None:
@@ -332,6 +422,10 @@ def check_resume(state: dict, profile: ModelProfile, path: Path) -> None:
     if tuple(state["layers"]) != profile.steering_layers or state.get("profile", "qwen06b") != profile.name:
         raise ValueError(f"{path} was trained for {state.get('profile', 'qwen06b')} layers {state['layers']}, "
                          f"not {profile.name} layers {list(profile.steering_layers)}. Use a new --run or --fresh.")
+
+
+def one_pass_updates(train_rows: int, prompts_per_update: int) -> int:
+    return math.ceil(train_rows / prompts_per_update)
 
 
 def finished_best_step(state: dict, updates: int) -> int | None:
@@ -383,7 +477,8 @@ def train_expert(run: Run, expert: str) -> dict:
     say(run.card, expert=expert, too_long_dropped={name: len(before) - len(after) for name, before, after in
                                                    zip(("train", "dev", "test"), loaded, (train, dev, test))})
     random.Random(SEED).shuffle(train)
-    dev, test = dev[:args.dev], test[:args.test]
+    dev, test = by_length(dev[:args.dev]), test[:args.test]
+    updates = one_pass_updates(len(train), args.prompts) if args.one_pass else args.updates
     bank = SteeringBank([expert], run.profile.steering_layers, run.model.config.hidden_size).to("cuda:0")
     bank.attach(run.model)
     norms, typical = activation_norms(run, train)
@@ -396,34 +491,52 @@ def train_expert(run: Run, expert: str) -> dict:
         bank.load_state_dict(state["bank"], strict=False)
         optimizer.load_state_dict(state["optimizer"])
         step = state["step"]
-        saved_best = finished_best_step(state, args.updates)
-    say(run.card, expert=expert, start_step=step, optimizer=args.optimizer, sampler=args.sampler,
-        eval_engine=args.sampler,
+        saved_best = finished_best_step(state, updates)
+    say(run.card, expert=expert, start_step=step, updates=updates, judge=args.judge, optimizer=args.optimizer,
+        sampler=args.sampler, eval_engine=args.sampler,
         activation_norms=[round(float(v), 2) for v in norms], typical_norms=[round(float(v), 2) for v in typical],
         caps=[round(float(v), 2) for v in caps],
         prompts={"train": len(train), "dev": len(dev), "test": len(test)})
-    base_dev = evaluate(run, bank, None, dev, expert)
+    base_answers = eval_answers(run, bank, None, dev)
+    base_dev = score_answers(run, dev, base_answers, expert)
+    if run.judge is not None:
+        base_dev = {**base_dev, "checklist_score": base_dev["score"], "score": JUDGE_NEUTRAL_SCORE}
     say(run.card, expert=expert, dev_base=base_dev["score"], degenerate=base_dev["degenerate"])
+
+    def dev_result(tag: str) -> dict:
+        if run.judge is None:
+            return evaluate(run, bank, 0, dev, expert)
+        return judged_dev(run, bank, dev, base_answers, expert, tag)
+
     probe = encode(run, [row["prompt"] for row in train[:PROBE_PROMPTS]])
     best_vector, best_score, best_step = bank.vectors[0].detach().clone(), base_dev["score"], step
     if saved_best is not None:
-        best_step, best_score = saved_best, evaluate(run, bank, 0, dev, expert)["score"]
+        run.judge_update = step
+        best_step, best_score = saved_best, dev_result(f"dev_resume_{step}")["score"]
     started = time.time()
-    best = (best_vector, best_score, best_step)
-    while step < args.updates:
+    best, skipped_in_row = (best_vector, best_score, best_step), 0
+    while step < updates:
         rows = [train[(step * args.prompts + i) % len(train)] for i in range(args.prompts)]
+        run.judge_update = step
         info = policy_step(run, bank, optimizer, caps, rows, expert, probe)
+        skipped_in_row = skipped_in_row + 1 if info.get("skipped_update") else 0
+        if skipped_in_row >= MAX_SKIPPED_UPDATES:
+            raise RuntimeError(f"{expert}: {skipped_in_row} updates in a row had too few judged prompts")
         step += 1
         save_atomic(torch, vector_state(run, bank, optimizer, step, expert), path)
-        say(run.card, expert=expert, step=step, **info, seconds=round(time.time() - started, 1))
-        if step % args.eval_every == 0 or step == args.updates:
-            result = evaluate(run, bank, 0, dev, expert)
+        say(run.card, expert=expert, step=step, of=updates, **info, seconds=round(time.time() - started, 1))
+        if step % args.eval_every == 0 or step == updates:
+            result = dev_result(f"dev_{step}")
             best = record_dev(run, bank, optimizer, history, result, bank.vectors[0].detach().clone(), step,
                               base_dev, expert, best)
     best_vector, best_score, best_step = best
     save_best(run, bank, best_vector, optimizer, step, best_step, expert, path)
-    final = {"base": evaluate(run, bank, None, test, expert), "steered": evaluate(run, bank, 0, test, expert),
-             "random": random_control(run, bank, test, expert)}
+    run.judge_update = step
+    if run.judge is not None:
+        final = judged_final(run, bank, test, expert)
+    else:
+        final = {"base": evaluate(run, bank, None, test, expert), "steered": evaluate(run, bank, 0, test, expert),
+                 "random": random_control(run, bank, test, expert)}
     report = {"expert": expert, "updates": step, "dev_base": base_dev["score"], "dev_history": history,
               "best_dev": best_score, "best_step": best_step,
               "test_prompts": len(test), "test": final, "settings": {k: v for k, v in vars(args).items()}}
@@ -537,7 +650,10 @@ def worker(name: str, experts, args, ready) -> None:
     sampler = start_sampler(name, args, eos, torch, profile) if args.sampler == "vllm" else None
     limit_torch_vram(torch, profile, name)
     model, turns = load_learner(torch, args, profile, sampler)
-    run = Run(torch, model, tokenizer, eos, tokenizer.pad_token_id, args, name, profile, sampler, turns)
+    judge = None
+    if args.judge == "haiku":
+        judge = ApiJudge(rl_data.OUT / args.run / "judge_calls.jsonl", run=args.run, budget_usd=args.judge_budget, seed=SEED)
+    run = Run(torch, model, tokenizer, eos, tokenizer.pad_token_id, args, name, profile, sampler, turns, judge)
     ready.set()
     while (expert := next_expert(experts)) is not None:
         say(name, took_next_behavior=expert)
@@ -591,6 +707,9 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lr-fraction", type=float, default=0.001)
     parser.add_argument("--cap-fraction", type=float, default=0.50, help="Largest vector, as a share of a typical token.")
     parser.add_argument("--fresh", action="store_true")
+    parser.add_argument("--one-pass", action="store_true", help="Run enough updates to see every training prompt once.")
+    parser.add_argument("--judge", choices=["checklist", "haiku"], default="checklist", help="Who scores the answers.")
+    parser.add_argument("--judge-budget", type=float, default=50.0, help="Hard stop for this run's Haiku spend, in USD.")
     return parser
 
 
@@ -598,6 +717,8 @@ def check_separate_cards(args) -> None:
     """In separate mode one learner on the second card drives the vLLM engine on the main card."""
     if args.vllm_swap == "separate" and (args.sampler != "vllm" or args.cards != "second"):
         raise ValueError("--vllm-swap separate needs --sampler vllm and --cards second")
+    if getattr(args, "judge", "checklist") == "haiku" and (args.sampler != "vllm" or args.group > 4):
+        raise ValueError("--judge haiku needs --sampler vllm and at most 4 answers per prompt")
 
 
 def main() -> int:

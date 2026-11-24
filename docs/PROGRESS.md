@@ -36,6 +36,17 @@ Real prompts per topic (train / dev / test):
 
 Teaching stays small because no suitable new source was found. About 920 of the 2,181 arena engineering prompts share one template.
 
+## Haiku-judged run: `qwen4b_haiku_v1` (started 2026-11-24)
+
+The regex story checklist did not predict human votes (49.6% on 26,298 LitBench pairs), and the old story vector collapsed into one "The rain fell" template. Training now uses Claude Haiku 5.5 as the judge.
+
+- **Data:** `python -m rl.prepare_v4` builds `data_review/rl_v4`: 68,944 train, 8,741 dev, 8,596 test prompts across 8 topics. Sexual-themed prompts are removed by keyword.
+- **Judge:** `rl/api_judge.py`. One call per prompt, in one order and its exact reverse, with thinking off and a strict JSON schema. A failed call is retried once, then skipped. Skipped calls never count as low scores.
+- **Limits:** 16 parallel calls, because 32 caused burst rate-limit errors. Account limits seen: 4,000 requests, 2M input tokens, and 400K output tokens per minute.
+- **Selection:** the best vector is the one Haiku prefers most against normal Qwen on dev prompts. If none beats normal, the zero vector is kept.
+- **Logs:** `data_review/rl_v4/<run>/judge_calls.jsonl`. They hold no API key or answer text.
+- **Budget:** $50 hard stop, counted across restarts.
+
 ## Rules for this stage
 
 - One model, VRAM and KV cache per card. Only token IDs and steering vectors cross between cards.

@@ -8,6 +8,7 @@ Prompts already in the current story set are left out, so the old story test sta
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 from collections import Counter, defaultdict
@@ -21,6 +22,7 @@ from behaviors.prepare_topics import BROKEN, MAX_NON_ASCII_LETTERS, make_record,
 
 RAW = DATA / "raw_v3"
 OUT = DATA / "clean_v3" / "story"
+PROSE_OUT = DATA / "clean_v3_prose" / "story"
 CURRENT = DATA / "clean_v2" / "story"
 TOPIC = "story"
 MIN_WORDS, MAX_WORDS = 4, 400
@@ -51,6 +53,9 @@ WP_TAG = re.compile(r"^\s*\[\s*([a-z]{2,4})\s*\]\s*", re.I)
 WP_KEEP = {"wp", "eu", "tt", "cw", "ff", "ip", "rf", "sp"}
 OLD_WRAPPER = re.compile(r"^write a short story about this idea:\s*", re.I)
 
+STORY_WORD = re.compile(r"\b(?:stor(?:y|ies)|tale|fanfic\w*|fan[- ]fiction)\b", re.I)
+OTHER_FORMAT = re.compile(r"\b(?:poems?|poetry|haiku|sonnet|limerick|ballad|lyrics|songs?|rap|verses?|stanzas?|scripts?|"
+                          r"screenplay|episode|sitcom|sketch|dialogues?|monologue|scenes?|outline|backstory)\b", re.I)
 ALWAYS_BLOCK = re.compile(r"\b(?:loli\w*|shota\w*|cp|pedo\w*|paedo\w*)\b", re.I)
 SEXUAL = re.compile(r"\b(?:nsfw|smut|hentai|sex\w*|nude\w*|naked|erotic\w*|porn\w*|fetish\w*|orgasm\w*|penis\w*|cock|dick|vagina\w*|pussy|"
                     r"breasts?|boobs?|tits|nipples?|lewd|horny|kink\w*|incest|rap(?:e|ed|es|ing)|moan\w*|arous\w*|"
@@ -60,6 +65,11 @@ MINOR = re.compile(r"\b(?:underage\w*|minors?|child(?:ren)?|kids?|toddlers?|infa
                    r"tweens?|teen\w*|schoolgirls?|schoolboys?|high ?school\w*|middle ?school\w*|elementary|"
                    r"(?:little|young) (?:girl|boy)s?|daughters?|sons?|step-?daughters?|step-?sons?|niece|nephew|"
                    r"(?:[1-9]|1[0-7])[- ]?(?:years?|yrs?|yo|y/o)(?:[- ]old)?|(?:aged?) (?:[1-9]|1[0-7]))\b", re.I)
+
+
+def is_prose_request(text: str) -> bool:
+    """The story checklist scores a prose arc, so another requested format would be rewarded for being ignored."""
+    return bool(STORY_WORD.search(text)) or not OTHER_FORMAT.search(text)
 
 
 def is_blocked(text: str) -> bool:
@@ -272,11 +282,13 @@ def limit_groups(rows: list[dict]) -> list[dict]:
     return kept
 
 
-def build(out: Path = OUT) -> dict:
+def build(out: Path = OUT, prose_only: bool = False) -> dict:
     seen, by_source, audit, samples = current_keys(), {}, defaultdict(Counter), []
     with ProcessPoolExecutor(max_workers=WORKERS) as pool:
         for name, loader in SOURCES:
-            by_source[name] = limit_groups(clean_source(pool, name, loader, seen, audit[name], samples))
+            rows = limit_groups(clean_source(pool, name, loader, seen, audit[name], samples))
+            by_source[name] = [row for row in rows if is_prose_request(row["prompt"])] if prose_only else rows
+            audit[name]["other_format"] = len(rows) - len(by_source[name])
             print(json.dumps({"source": name, "kept": len(by_source[name]), **audit[name]}), flush=True)
     quotas = balance_sources({name: len(rows) for name, rows in by_source.items()})
     final = [row for name, rows in by_source.items()
@@ -295,4 +307,7 @@ def build(out: Path = OUT) -> dict:
 
 
 if __name__ == "__main__":
-    print(json.dumps(build(), indent=1))
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--prose", action="store_true", help="keep prose story requests, in data_review/clean_v3_prose")
+    args = parser.parse_args()
+    print(json.dumps(build(PROSE_OUT if args.prose else OUT, args.prose), indent=1))

@@ -481,6 +481,41 @@ class TestCapAndBestVector(unittest.TestCase):
         self.assertTrue((bank.vectors[0] == 2.0).all())
         optimizer.shrink.assert_called_once()
 
+    def test_one_pass_covers_every_training_prompt(self):
+        self.assertEqual(pilot.one_pass_updates(32, 16), 2)
+        self.assertEqual(pilot.one_pass_updates(33, 16), 3)
+
+    def test_judged_rollouts_leave_out_prompts_without_a_verdict(self):
+        judge = mock.Mock()
+        judge.judge.return_value = ([[1.0, 0.0], None], SimpleNamespace(summary=lambda: {"seconds": 1.0}))
+        run = SimpleNamespace(judge=judge, judge_update=4, last_judge=None,
+                              tokenizer=SimpleNamespace(decode=lambda tokens, skip_special_tokens: str(tokens)))
+        out = pilot.judged_rollouts(run, [{"prompt": "a"}, {"prompt": "b"}], [[1], [2]], [[[5], [6]], [[7], [8]]], "story")
+        self.assertEqual(out[0], [[1], [1]])
+        self.assertEqual(out[1], [[5], [6]])
+        self.assertEqual(out[3], [0.5, -0.5])
+
+    def judged_run(self, rewards):
+        judge = mock.Mock()
+        judge.judge.return_value = (rewards, SimpleNamespace(retried=0, skipped=0, cost_usd=0.0, seconds=0.0))
+        return SimpleNamespace(judge=judge, judge_update=1, card="second",
+                               tokenizer=SimpleNamespace(decode=lambda tokens, skip_special_tokens: str(tokens)))
+
+    def test_final_comparison_reports_each_answer_set(self):
+        run = self.judged_run([[0.2, 0.8, 0.5], [0.4, 0.4, 0.1]])
+        sets = {"base": [[1], [2]], "steered": [[3], [4]], "random": [[5], [6]]}
+        with mock.patch.object(pilot, "say"):
+            out = pilot.compare_with_judge(run, [{"prompt": "a"}, {"prompt": "b"}], sets, "story", "final_test")
+        self.assertEqual(out["steered"], {"reward": 0.6, "beats_base_pct": 75.0})
+        self.assertEqual(out["random"]["beats_base_pct"], 50.0)
+        self.assertEqual(run.judge.judge.call_args.args[0][1].answers, ("[2]", "[4]", "[6]"))
+
+    def test_too_few_judged_prompts_give_no_comparison(self):
+        run = self.judged_run([[0.2, 0.8], None, None])
+        sets = {"base": [[1], [2], [3]], "steered": [[4], [5], [6]]}
+        with mock.patch.object(pilot, "say"):
+            self.assertIsNone(pilot.compare_with_judge(run, [{"prompt": "a"}, {"prompt": "b"}, {"prompt": "c"}], sets, "story", "dev"))
+
     def test_resume_keeps_the_best_update_of_a_finished_file(self):
         self.assertEqual(pilot.finished_best_step({"step": 86, "best_step": 65}, 86), 65)
 

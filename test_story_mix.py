@@ -3,7 +3,7 @@
 import unittest
 
 from behaviors.prepare_story_mix import (MODERATION_BLOCKED, balance_sources, cap_prefixes, clean_one, clean_wp, is_blocked,
-                                         moderation_flagged)
+                                         is_prose_request, moderation_flagged)
 
 
 class TestSafety(unittest.TestCase):
@@ -76,6 +76,16 @@ class TestRequests(unittest.TestCase):
     def test_question_about_a_story_is_dropped(self):
         result = clean_one(("lmsys", "What is the story of the film Alien about"))
         self.assertEqual(result[:2], ("drop", "no_creative_request"))
+
+
+class TestProseRequests(unittest.TestCase):
+    def test_story_requests_stay(self):
+        for text in ("Write a story where a robot learns to sing a song", "A depressed assassin talks to his therapist"):
+            self.assertTrue(is_prose_request(text), text)
+
+    def test_other_formats_are_left_out(self):
+        for text in ("Write a poem about the sea", "Write a script about rogue planets", "Compose a sonnet to mint tea"):
+            self.assertFalse(is_prose_request(text), text)
 
 
 class TestWritingPrompts(unittest.TestCase):
