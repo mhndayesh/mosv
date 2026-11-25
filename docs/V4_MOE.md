@@ -33,4 +33,42 @@ Differences from v3, and the risks they bring:
    86-prompt blind Haiku test against the normal answers (`reports/score_full.py`).
 5. If the distilled version loses quality: RL fine-tune the experts and gates with the v3 recipe.
 
-LM Studio: it can load this only if its bundled llama.cpp includes `hy_v3` (added to llama.cpp in 2026).
+## Results (2026-11-25, all steps run)
+
+**Data:** 2,400 rows (240 per topic, 480 none), 1.02M answer tokens, v3 vectors on (vLLM, one card).
+
+**Distillation** (held-out rows, 96 sampled tokens per row):
+
+| Layer | Gate accuracy per token | Answer tokens only | Expert error vs v3 vector |
+|---|---|---|---|
+| 9 | 95.0% | 95.4% | 0.6-1.8% |
+| 18 | 99.3% | 99.4% | 0.5-1.0% |
+| 27 | 99.4% | 99.5% | 0.7-2.3% |
+
+Layers 18 and 27 are easier because the steering from layer 9 is already in the hidden state.
+
+**One GGUF, stock llama.cpp:** `C:\llm\models\qwen3-4b-steer\Qwen3-4B-steer-v4-MoE-F16.gguf` (8.10 GB, 55 MB more
+than Qwen). 86 full-length answers with `moe/full_test.py`, one full copy per card (never tensor parallel):
+138,947 tokens in 379 s = **367 tok/s**, 1 answer hit the 8,192-token cap. Openings match the v3 steered answers.
+
+**Blind Haiku scores** (same rubric and normal answers as v3; 172 calls, 0 failed, $0.10):
+
+| Topic | Normal | v3 | v4 | v4 wins |
+|---|---|---|---|---|
+| Debugging | 1.70 | 4.12 | 4.09 | 10/10 |
+| Professional email | 3.22 | 4.01 | 4.03 | 10/10 |
+| Story | 2.55 | 3.82 | 3.66 | 10/10 |
+| Teaching | 2.72 | 3.43 | 3.55 | 9/10 |
+| Explanation | 2.90 | 3.45 | 3.49 | 8/10 |
+| How-to | 3.00 | 2.86 | 3.21 | 7/10 |
+| Engineering | 2.48 | 2.18 | 2.41 | 3/10 |
+| Math | 4.53 | 4.47 | 4.43 | 2/10 |
+| **All 80 topic prompts** | **2.89** | **3.54** | **3.61** | |
+
+v4 keeps v3's quality; the differences are within Haiku's run-to-run noise.
+
+**LM Studio:** its active engine (llama.cpp ROCm runtime 2.80.1) includes `hy_v3`. Running that engine's own
+`llama-server.exe` on the v4 GGUF gives steered answers whose openings match stock llama.cpp v4 (92-221 chars).
+Not yet loaded through the LM Studio app itself: `lms import <gguf>` then load it in the app.
+
+Not done yet: RL fine-tuning of the experts (not needed so far); a Q8_0 version (`llama-quantize`).

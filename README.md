@@ -127,6 +127,14 @@ llama.cpp answers open like the vLLM steered answers (and unsteered like the nor
 sentence or two because llama.cpp and vLLM round differently. A topic switch reloads the model (about 5-10 s with
 F16 and `--models-max 1`).
 
+## v4: one GGUF, real MoE layers, stock llama.cpp (branch `v4-moe`)
+
+`Qwen3-4B-steer-v4-MoE-F16.gguf` runs in plain llama.cpp (and LM Studio's engine) with no proxy:
+`llama-server -m Qwen3-4B-steer-v4-MoE-F16.gguf -ngl 999 --jinja`. The steering is built as MoE layers of the
+`hy_v3` architecture llama.cpp already has, and the router lives inside the model as per-token gates. It scores
+the same as v3 (3.61 vs 3.54 on the blind test). How it was built and measured: [docs/V4_MOE.md](docs/V4_MOE.md).
+Rebuild: `moe/make_data.py` -> `moe/train.py` (WSL, one card) -> `moe/export.py` -> `moe/full_test.py`.
+
 ## What reproduces exactly, and what does not
 
 | Step | Exact on rerun? |
