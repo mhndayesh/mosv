@@ -29,10 +29,6 @@ LABELS = {"engineering": "Engineering", "story": "Story", "teaching": "Teaching"
 TREE = re.compile("[├└│┌┐┘┴┬┼─]")
 dropped = set()
 page_offset = 0
-RESULTS = HERE.parent / "rl_v2" / "qwen4b_v2"
-TOPICS = ("engineering", "story", "teaching", "debugging", "math_solving", "explanation", "professional_email", "how_to_guide")
-SHOWN_SAMPLES = {"WildChat-1M": (1, 2), "LMSYS Chat 1M (clean)": (1, 2), "WritingPrompts": (0, 2),
-                 "Arena preference 140k": (1,), "ShareGPT V3": (1, 2), "no_robots": (0, 2), "Storium-5K": (0, 2)}
 
 
 def register_fonts():
@@ -99,12 +95,22 @@ def height(flowables, width):
     return total
 
 
+def trim(flowables, width, room, size):
+    """Last resort at the smallest size: drop lines from the end and say so, so one page still holds the answer."""
+    note = Paragraph("<i>[... rest cut to fit the page]</i>", style("cut", size, color=MUTED, after=0))
+    while flowables and height(flowables + [note], width) > room:
+        flowables = flowables[:-1]
+    return flowables + [note]
+
+
 def fit(left, right, width, room, accents):
     for size in SIZES:
         a, b = answer_flowables(left, size, accents[0]), answer_flowables(right, size, accents[1])
         if max(height(a, width), height(b, width)) <= room:
             return a, b, size
-    raise ValueError(f"Answer does not fit even at {SIZES[-1]} pt")
+    a = a if height(a, width) <= room else trim(a, width, room, size)
+    b = b if height(b, width) <= room else trim(b, width, room, size)
+    return a, b, size
 
 
 def score_text(value):
@@ -211,87 +217,61 @@ def header_row(labels):
     return [Paragraph(label, head) for label in labels]
 
 
-def router_summary():
-    audit = json.loads((HERE / "route_audit.json").read_text(encoding="utf-8"))
-    topics = {name: item for name, item in audit.items() if name != "none"}
-    total = sum(item["prompts"] for item in topics.values())
-    right = sum(item["routes"].get(name, 0) for name, item in topics.items())
-    missed = sum(item["routes"].get("none", 0) for item in topics.values())
-    plain = audit["none"]
-    return (f"<b>Router on all held-out prompts:</b> {right:,} of {total:,} topic prompts got the right vector, "
-            f"{total - right - missed} got a wrong vector, {missed} got no steering. On {plain['prompts']} normal prompts, "
-            f"{plain['prompts'] - plain['routes'].get('none', 0)} were steered by mistake.")
+def router_summary(rows):
+    topic = [r for r in rows if r["type"] != "none"]
+    right = sum(r["route"] == r["type"] for r in topic)
+    missed = sum(r["route"] == "none" for r in topic)
+    plain = [r for r in rows if r["type"] == "none"]
+    wrongly = sum(r["route"] != "none" for r in plain)
+    return (f"<b>Router in this test:</b> {right} of {len(topic)} topic prompts got their own vector, "
+            f"{len(topic) - right - missed} got another topic's vector, {missed} got no steering. "
+            f"{wrongly} of {len(plain)} normal prompts were steered by mistake.")
 
 
-def results_page():
-    reports = [json.loads((RESULTS / f"{name}.json").read_text(encoding="utf-8")) for name in TOPICS]
-    reports.sort(key=lambda r: -r["test"]["steered"]["score"])
+def summary_cell(item, cell):
+    final = item["final"]
+    if not final:
+        return [Paragraph("not run (stopped at ceiling)", style("m", 9.5, color=MUTED, after=0))] + [Paragraph("", cell)] * 3
+    return [Paragraph(f'{final["test_base"]:.2f}', cell), Paragraph(f'{final["test_random"]:.2f}', cell),
+            Paragraph(f'<b>{final["test_steered"]:.2f}</b>', cell), Paragraph(f'{final["beats_base_pct"]:.0f}%', cell)]
+
+
+def results_page(rows):
+    summary = json.loads((HERE / "haiku_v3_summary.json").read_text(encoding="utf-8"))
+    summary.sort(key=lambda s: -s["dev"])
     cell = style("r", 10.5, after=0)
-    data = [header_row(["Topic", "Test prompts", "Unsteered", "Random vector", "Trained vector", "Broken answers"])]
-    for r in reports:
-        test = r["test"]
-        data.append([Paragraph(f'<font color="{THEMES[r["expert"]][0]}"><b>{LABELS[r["expert"]]}</b></font>', cell),
-                     Paragraph(str(r["test_prompts"]), cell), Paragraph(f'{test["base"]["score"]:.3f}', cell),
-                     Paragraph(f'{test["random"]["score"]:.3f}', cell), Paragraph(f'<b>{test["steered"]["score"]:.3f}</b>', cell),
-                     Paragraph(f'{test["steered"]["degenerate"]:.1%}', cell)])
-    notes = ["<b>What the score means:</b> the checklist measures structure and process, not truth or writing quality.",
-             "<b>Professional email:</b> treat its score as format only. Its checklist has passed an email that changed the request's purpose.",
-             "<b>Debugging:</b> prompts too long to leave room for a full answer were excluded.",
-             router_summary(),
-             "<b>Router bug fixed in this version:</b> after the first generation, pad tokens leaked into the router's input and sent many debugging prompts to the math vector. The earlier 46-prompt PDF was affected on page 21."]
+    data = [header_row(["Topic", "Vector step", "Dev score (Haiku)", "Final test: normal", "Random vector",
+                        "Trained vector", "Beats normal"])]
+    for item in summary:
+        data.append([Paragraph(f'<font color="{THEMES[item["topic"]][0]}"><b>{LABELS[item["topic"]]}</b></font>', cell),
+                     Paragraph(str(item["step"]), cell), Paragraph(f'<b>{item["dev"]:.2f}</b>', cell),
+                     *summary_cell(item, cell)])
+    notes = ["<b>Dev score:</b> Claude Haiku compares the steered answer with normal Qwen's answer on 128 held-out prompts, "
+             "twice with the order swapped. 0.50 is a tie; above 0.50 means the vector helps.",
+             "<b>Vector step:</b> the best of each topic's last 3 dev checks, not the best score overall, because the judge is not fully trusted.",
+             "<b>Final test:</b> Haiku scores on held-out test prompts, 0 to 1. Only the 3 topics that trained to the end ran it.",
+             "<b>How-to guide:</b> its vector is worse than normal Qwen (dev 0.48). It is kept here so you can see it.",
+             router_summary(rows),
+             "<b>Scores on the answer pages</b> come from the topic's local checklist (structure and process), not from Haiku."]
     body = style("n", 10, color=colors.HexColor("#334155"), after=5)
-    return [Paragraph("Qwen3-4B steering vectors: final results", style("title", 20, "BodyB", after=4)),
-            Paragraph("All 8 topics, trained on a frozen model and tested on held-out prompts.", style("sub", 11, color=MUTED, after=9)),
-            grid(data, [FRAME_W * share for share in (0.29, 0.13, 0.14, 0.15, 0.15, 0.14)]), Spacer(1, 11),
+    return [Paragraph("Qwen3-4B with router and 8 steering vectors", style("title", 20, "BodyB", after=4)),
+            Paragraph("Frozen model. Vectors trained with RL and a Claude Haiku judge. All prompts held out from training.",
+                      style("sub", 11, color=MUTED, after=9)),
+            grid(data, [FRAME_W * share for share in (0.2, 0.1, 0.13, 0.15, 0.13, 0.15, 0.14)]), Spacer(1, 11),
             *[Paragraph(note, body) for note in notes], PageBreak()]
-
-
-def clean(text, limit):
-    flat = " ".join(keep_drawable(text, "Body").split())
-    return escape(flat if len(flat) <= limit else flat[:limit - 3] + "...", quote=False)
-
-
-def data_pages():
-    sources = json.loads((HERE / "story_samples.json").read_text(encoding="utf-8"))
-    cell = style("d", 9.2, after=0)
-    data = [header_row(["Source", "Who wrote it", "Rows measured", "Median words", "3+ paragraphs", "Dialogue", "Markdown", "Story checklist"])]
-    for s in sources:
-        data.append([Paragraph(f'<b>{s["source"]}</b>', cell), Paragraph(s["origin"], cell), Paragraph(str(s["measured"]), cell),
-                     Paragraph(str(s["median_words"]), cell), Paragraph(f'{s["pct_3plus_paragraphs"]}%', cell),
-                     Paragraph(f'{s["pct_dialogue"]}%', cell), Paragraph(f'{s["pct_markdown"]}%', cell),
-                     Paragraph(f'{s["story_checklist"]:.2f}', cell)])
-    verdict = ("<b>Do the responses have structure?</b> They have normal writing structure, such as paragraphs, dialogue, verses and script format, "
-               "but <b>not the process structure our checklist rewards</b>. Their story checklist averages are 0.00 to 0.35."
-               "So they are mostly natural text, close to what a model already saw in pretraining. "
-               "<b>We would use the prompts only.</b> The RL loop writes its own answers, so these responses are not training targets. "
-               "Storium's replies are mostly short character descriptions, so its replies are not usable as answers. "
-               "These are small samples of 8 to 60 rows per source, after a safety filter, and a few non-story rows passed the keyword match.")
-    samples = [header_row(["Source", "Real prompt", "Its response (start)"])]
-    small = style("s", 8.4, after=0)
-    for s in sources:
-        for index in SHOWN_SAMPLES[s["source"]]:
-            item = s["samples"][index]
-            samples.append([Paragraph(f'<b>{s["source"]}</b>', small), Paragraph(clean(item["prompt"], 330), small),
-                            Paragraph(clean(item["response"], 520), small)])
-    return [Paragraph("New story data: what we found", style("title", 20, "BodyB", after=4)),
-            Paragraph("Not downloaded yet. Rows below were read from the public dataset viewer.", style("sub", 11, color=MUTED, after=8)),
-            grid(data, [FRAME_W * share for share in (0.2, 0.24, 0.09, 0.09, 0.1, 0.09, 0.09, 0.1)]), Spacer(1, 10),
-            Paragraph(verdict, style("v", 10.2, color=colors.HexColor("#334155"), after=0)), PageBreak(),
-            Paragraph("Sample prompts from each source", style("title", 17, "BodyB", after=7)),
-            grid(samples, [FRAME_W * 0.14, FRAME_W * 0.36, FRAME_W * 0.50]), PageBreak()]
 
 
 def footer(canvas, doc):
     canvas.saveState()
     canvas.setFont("Body", 8)
     canvas.setFillColor(MUTED)
-    canvas.drawString(MARGIN, 14, "Steering vectors on frozen Qwen3-4B | run qwen4b_v2 | research only")
+    canvas.drawString(MARGIN, 14, "Steering vectors on frozen Qwen3-4B | run qwen4b_haiku_v3 | research only")
     canvas.drawRightString(PAGE_W - MARGIN, 14, f"Page {doc.page}")
     canvas.restoreState()
 
 
 def build(target, rows) -> int:
-    story = results_page() + data_pages() + index_page(rows)
+    story = results_page(rows) + index_page(rows)
     for row in rows:
         story += detail_page(row)
     story.pop()
