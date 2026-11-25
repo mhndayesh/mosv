@@ -2,7 +2,8 @@
 
 Run (Windows, gguf-tools venv):
     python reports/answer_v5.py --topic engineering --model C:/llm/models/bonsai-4b/Bonsai-4B-Q1_0.gguf --tag bonsai_normal
-Greedy, f16 KV cache, full answers up to --max-new tokens. Writes data_review/v5_runs/<topic>/<tag>.jsonl with
+Greedy, f16 KV cache. --max-new 0 = no output cap: an answer ends at its own stop token, or only if it fills its
+slot's whole context (--slot-ctx, default 16,384 tokens; the row's finish is then "length"). Writes data_review/v5_runs/<topic>/<tag>.jsonl with
 id, source, prompt, answer, tokens, finish reason and seconds, plus a settings header line. Same prompts, same
 order and same settings for every model, so before/after answers line up by id.
 """
@@ -25,8 +26,9 @@ def parse_args(argv=None):
     p.add_argument("--topic", required=True)
     p.add_argument("--model", required=True, type=Path)
     p.add_argument("--tag", required=True, help="output name, e.g. bonsai_normal")
-    p.add_argument("--max-new", type=int, default=2048)
-    p.add_argument("--slots", type=int, default=24, help="parallel answers per card")
+    p.add_argument("--max-new", type=int, default=0, help="0 = no cap (stop token or full slot context)")
+    p.add_argument("--slot-ctx", type=int, default=16384, help="context tokens per parallel answer")
+    p.add_argument("--slots", type=int, default=5, help="parallel answers per card (5 x 16k f16 fits each card)")
     return p.parse_args(argv)
 
 
@@ -40,7 +42,7 @@ def locked_prompts(topic: str) -> list[dict]:
 
 
 def start(model: Path, card: str, port: int, args) -> subprocess.Popen:
-    ctx = args.slots * (args.max_new + 1024)
+    ctx = args.slots * args.slot_ctx
     cmd = [SERVER, "-m", str(model), "-dev", card, "-ngl", "99", "--port", str(port), "-fa", "on", "-c", str(ctx),
            "-np", str(args.slots), "-b", "4096", "-ub", "1024"]
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -55,8 +57,10 @@ def start(model: Path, card: str, port: int, args) -> subprocess.Popen:
 
 
 def answer(row: dict, port: int, max_new: int) -> dict:
-    body = json.dumps({"messages": [{"role": "user", "content": row["prompt"]}], "temperature": 0,
-                       "max_tokens": max_new}).encode()
+    request = {"messages": [{"role": "user", "content": row["prompt"]}], "temperature": 0}
+    if max_new:
+        request["max_tokens"] = max_new
+    body = json.dumps(request).encode()
     t = time.time()
     req = urllib.request.Request(f"http://127.0.0.1:{port}/v1/chat/completions", body, {"Content-Type": "application/json"})
     out = json.loads(urllib.request.urlopen(req, timeout=3600).read())

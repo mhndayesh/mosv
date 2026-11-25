@@ -84,13 +84,24 @@ def tensor_list(reader, moe: dict) -> list:
     return out
 
 
-def main(argv=None):
-    args = parse_args(argv)
-    reader = gguf.GGUFReader(args.source)
+def source_reader(path: Path):
+    reader = gguf.GGUFReader(path)
     if reader.fields["general.architecture"].contents() != "qwen3":
         sys.exit("source must be a qwen3 GGUF")
+    return reader
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    reader = source_reader(args.source)
     width = int(reader.fields["qwen3.embedding_length"].contents())
     moe = load_moe(args.moe) if args.moe else empty_moe(args.empty, width)
+    write(reader, args.out, moe)
+
+
+def write(reader, out: Path, moe: dict) -> None:
+    """Write the hy_v3 GGUF: every source tensor (steer-layer MLPs renamed to the shared expert) + gates/experts."""
+    args = argparse.Namespace(out=out)
     writer = gguf.GGUFWriter(str(args.out), "hy_v3")
     copy_metadata(reader, writer, moe)
     tensors = tensor_list(reader, moe)

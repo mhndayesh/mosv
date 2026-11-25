@@ -81,3 +81,43 @@ class TestFullTestSettings(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(HAS_GGUF, "needs torch and gguf-py")
+class TestLiveGguf(unittest.TestCase):
+    """v5: patching gate/expert bytes in place must give the same file as a fresh build."""
+
+    def tiny_qwen3(self, path: Path) -> None:
+        import gguf
+        import numpy as np
+
+        w = gguf.GGUFWriter(str(path), "qwen3")
+        w.add_embedding_length(4)
+        w.add_feed_forward_length(3)
+        for p, shape in (("gate", (3, 4)), ("up", (3, 4)), ("down", (4, 3))):
+            for layer in (9, 18, 27):
+                w.add_tensor(f"blk.{layer}.ffn_{p}.weight", np.full(shape, layer, np.float32))
+        w.write_header_to_file(); w.write_kv_data_to_file(); w.write_tensors_to_file(); w.close()
+
+    def moe(self, value: float) -> dict:
+        import numpy as np
+
+        part = {"gate_inp": np.full((3, 4), value, np.float32), "gate_exps": np.full((3, 2, 4), value, np.float16),
+                "up_exps": np.full((3, 2, 4), value, np.float16), "down_exps": np.full((3, 4, 2), value, np.float16)}
+        return {"classes": ["none", "a", "b"], "ff": 2, "layers": {l: dict(part) for l in (9, 18, 27)}}
+
+    def test_patch_equals_fresh_build_and_rejects_wrong_size(self):
+        from moe import live_gguf
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            self.tiny_qwen3(tmp / "base.gguf")
+            live_gguf.build(tmp / "base.gguf", tmp / "live.gguf", self.moe(1.0))
+            live_gguf.build(tmp / "base.gguf", tmp / "fresh.gguf", self.moe(2.0))
+            written = live_gguf.patch(tmp / "live.gguf", self.moe(2.0))
+            self.assertEqual((tmp / "live.gguf").read_bytes(), (tmp / "fresh.gguf").read_bytes())
+            self.assertEqual(written, 3 * (3 * 4 * 4 + 3 * 3 * 2 * 4 * 2))
+            wrong = self.moe(2.0)
+            wrong["layers"][9]["up_exps"] = wrong["layers"][9]["up_exps"][:2]
+            with self.assertRaises(ValueError):
+                live_gguf.patch(tmp / "live.gguf", wrong)
