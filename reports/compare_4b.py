@@ -15,7 +15,7 @@ from evaluate import load_cases
 from model_profiles import get_profile
 from system import NONE, load_system
 
-RUN = "qwen4b_v2"
+RUN = "qwen4b_haiku_v3_test"  # Picked vectors; the router choice does not depend on them.
 SEED = 7
 TRAINED = ("engineering", "story", "teaching", "debugging", "math_solving", "explanation", "professional_email",
            "how_to_guide")

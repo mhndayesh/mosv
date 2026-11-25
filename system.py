@@ -189,7 +189,7 @@ def check_parts(profile: ModelProfile, saved: dict, width: int, layers: tuple[in
         raise ValueError(f"Router or vector width does not match the model width {width}")
 
 
-def load_system(model_path: str | None = None, run: str = "pilot_final", router_path: Path | None = None,
+def load_system(model_path: str | None = None, run: str = "qwen4b_haiku_v3_test", router_path: Path | None = None,
                 vectors_dir: Path = VECTORS_DIR, max_new_tokens: int = MAX_NEW_TOKENS,
                 profile: str | None = None) -> System:
     from transformers import AutoModelForCausalLM, AutoTokenizer

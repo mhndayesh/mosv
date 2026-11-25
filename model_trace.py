@@ -1,6 +1,6 @@
 """Log what happens inside the model, token by token.
 
-Run in WSL: python model_trace.py --run vllm_full
+Run in WSL: python model_trace.py --run qwen4b_haiku_v3_test
 For each prompt: the router's probabilities, then for every generated token what each steering layer
 added, which trained vector that matches, and the word produced. Details go to data_review/traces/<run>.jsonl.
 """
@@ -130,7 +130,7 @@ def main(args) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--run", default="vllm_full")
+    parser.add_argument("--run", default="qwen4b_haiku_v3_test")
     parser.add_argument("--model", default=None)
     parser.add_argument("--profile", choices=sorted(PROFILES), default=None, help="Base model (else $STEERING_PROFILE)")
     parser.add_argument("--prompt", action="append", help="Repeat to trace your own prompts.")

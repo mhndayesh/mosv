@@ -48,12 +48,13 @@ rewards; no PPO clipping, no KL term) updates only that topic's vector.
 | `rl/api_judge.py`, `rl/judge_rubrics.py` | Claude Haiku judge and the 8 topic rubrics |
 | `rl/vllm_sampler.py`, `rl/vllm_plugin/` | vLLM answer writing with the live vector |
 | `rl/data.py`, `rl/prepare_v4.py` | Training splits (`data_review/rl_v4`) |
+| `reports/pick_vectors.py` | Picks each topic's test vector from a run (best of the last 3 dev checks) and writes the summary |
 | `reports/compare_4b.py` | Picks the 86 review prompts and records the router's choice (`compare_4b.json`) |
 | `reports/vllm_full_test.py` | Writes full-length normal and steered answers on vLLM |
 | `reports/score_full.py` | Blind Haiku scoring, one score per criterion, strict JSON |
 | `reports/build_pdf_full.py` | The side-by-side PDF with bookmarks (helpers in `build_pdf_4b.py`) |
 | `evaluate.py`, `infer.py`, `model_trace.py` | Older checklist evaluation, one-off routed answers, per-token trace |
-| `test_*.py` | Tests (`python -m pytest`) |
+| `test_*.py` | Tests (`python -m pytest`); `test_reports.py` covers the review scripts with no GPU |
 | `checkpoints/rl_pilot/qwen4b_haiku_v3*` | Current vectors (`_test` = the step picked per topic). Gitignored |
 | `data_review/` | Datasets and reports. Gitignored, research-only licences |
 | `archive/` | Failed and superseded work. Gitignored |
@@ -73,12 +74,29 @@ export LD_LIBRARY_PATH=$V/lib/python3.12/site-packages/_rocm_sdk_core/lib ROCPRO
 
 1. **Data:** `python -m behaviors.prepare_topics`, `python -m behaviors.prepare_story_mix`, `python -m rl.prepare_v4`.
 2. **Router:** `python -m router.pipeline`.
-3. **Train** (shape of the command; see `python -m rl.pilot --help`):
-   `$V/bin/python -m rl.pilot --profile qwen4b --run <name> --judge haiku --interleave --overlap --sampler vllm --vllm-swap separate --compile`
-4. **Full-length test, one card** (`HIP_VISIBLE_DEVICES=0` is the second card, the one with no screen):
-   `HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 $V/bin/python reports/vllm_full_test.py --max-model-len 81920 --kv-gib 5.7 --max-seqs 128`
-5. **Score:** `$V/bin/python reports/score_full.py` (Haiku key in `C:\projects\api\claude.txt`; only unscored pairs are sent).
-6. **PDF** (Windows, any Python with reportlab): `python reports/build_pdf_full.py data_review/reports/qwen4b_full_answers.pdf`.
+3. **Train.** The exact settings of `qwen4b_haiku_v3` are saved in each finished topic's
+   `data_review/rl_v4/qwen4b_haiku_v3/<topic>.json` (`settings`), and its training logs are in `train_logs/`:
+   `$V/bin/python -m rl.pilot --profile qwen4b --run <name> --judge haiku --interleave --overlap --sampler vllm --vllm-swap separate --cards main --engine-card second --compile --one-pass --prompts 8 --group 4 --max-new 512 --dev 128 --test 300 --eval-every 50 --step-fraction 0.0025 --judge-budget 100`
+4. **Pick the test vectors** (CPU, seconds): `python reports/pick_vectors.py` writes
+   `checkpoints/rl_pilot/qwen4b_haiku_v3_test` and `data_review/reports/haiku_v3_summary.json`.
+5. **Pick the 86 review prompts and record the router's choice:** `$V/bin/python reports/compare_4b.py`
+   (seed 7, writes `data_review/reports/compare_4b.json`).
+6. **Full-length test, one card** (`HIP_VISIBLE_DEVICES=0` is the second card, the one with no screen; the
+   defaults are the settings used): `HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 $V/bin/python reports/vllm_full_test.py`
+7. **Score:** `$V/bin/python reports/score_full.py` (Haiku key in `C:\projects\api\claude.txt`; only unscored pairs are sent).
+8. **PDF** (Windows, any Python with reportlab): `python reports/build_pdf_full.py data_review/reports/qwen4b_full_answers.pdf`.
+
+Package versions: `requirements.txt`. Light tests for steps 4-8, no GPU: `python -m pytest test_reports.py`.
+
+## What reproduces exactly, and what does not
+
+| Step | Exact on rerun? |
+|---|---|
+| Data splits, router labels, prompt pick (seeds fixed) | Yes |
+| Picking the test vectors (step 4) | Yes: rebuilt bit for bit from the snapshots and logs (checked 2026-11-25) |
+| Training (step 3) | No: answers are sampled and Haiku's verdicts vary, so a rerun gives different vectors |
+| Full-length answers (step 6) | Mostly: greedy, but about 1 in 4 long answers changes between identical vLLM runs |
+| Haiku scores (step 7) | Close, not exact: the order shuffle is seeded, but Haiku's replies can vary slightly |
 
 ## Hardware rules (measured on this box)
 

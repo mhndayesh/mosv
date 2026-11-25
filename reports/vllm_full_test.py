@@ -1,6 +1,6 @@
 """Routed vs normal answers on vLLM: paged KV cache in fp8, long context, answers run until the model stops.
 
-Run in WSL: python reports/vllm_full_test.py --tp 2 --max-model-len 262144
+Run in WSL on one card: HIP_VISIBLE_DEVICES=0 python reports/vllm_full_test.py (never --tp 2, see README)
 --probe only starts the engine and prints the KV cache capacity.
 
 Reuses the router's picks from compare_4b.json: same 86 prompts, same trained router, so only the writing changes.
@@ -34,14 +34,14 @@ def parse_args(argv=None):
     p.add_argument("--source", type=Path, default=REPORTS / "compare_4b.json", help="prompts and router picks")
     p.add_argument("--out", type=Path, default=REPORTS / "vllm_full_test.json")
     p.add_argument("--tp", type=int, default=1, help="cards one engine spans")
-    p.add_argument("--max-model-len", type=int, default=262144)
+    p.add_argument("--max-model-len", type=int, default=81920)  # Defaults = the settings of the 2026-11-25 run.
     p.add_argument("--kv", default="fp8")
-    p.add_argument("--util", type=float, default=0.90)
-    p.add_argument("--max-seqs", type=int, default=256)
+    p.add_argument("--util", type=float, default=0.95)
+    p.add_argument("--max-seqs", type=int, default=128)
     p.add_argument("--batched", type=int, default=8192, help="max tokens per engine step")
     p.add_argument("--stress", type=int, default=0, help="extra copies of the normal pass, to fill the cache")
     p.add_argument("--eager", action="store_true", help="skip CUDA graphs: less VRAM, slower")
-    p.add_argument("--kv-gib", type=float, default=None, help="fixed KV cache per card; overrides --util's split")
+    p.add_argument("--kv-gib", type=float, default=5.7, help="fixed KV cache per card; overrides --util's split")
     p.add_argument("--probe", action="store_true")
     return p.parse_args(argv)
 

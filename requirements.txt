@@ -1,3 +1,11 @@
-torch>=2.4
-transformers>=4.57,<6
-safetensors>=0.4
+# Versions used for the 2026-11-25 results (WSL venv ~/vllm-dual-9070xt/.venv, Python 3.12).
+# torch and vllm are ROCm builds for the RX 9070 XT; they do not come from plain PyPI.
+torch==2.13.0          # +rocm10.3.0a20261105
+vllm==0.34.0           # +rocm100; plus the steering plugin: pip install -e rl/vllm_plugin
+transformers==5.22.2
+safetensors==0.8.0
+numpy==2.3.5
+pyarrow==26.0.1        # data preparation
+anthropic==2.12.0      # Haiku judge and scorer; key in C:\projects\api\claude.txt
+reportlab              # PDF reports only (any recent version)
+pytest                 # tests

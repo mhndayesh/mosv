@@ -1,6 +1,6 @@
 """Held-out check of the whole path: router + vectors against the oracle expert and the unsteered model.
 
-Run: python evaluate.py --run pilot_final [--profile qwen4b] [--model PATH] [--limit 20] [--out report.json]
+Run: python evaluate.py --run qwen4b_haiku_v3_test [--profile qwen4b] [--model PATH] [--limit 20] [--out report.json]
 Cases: each behavior's test split plus `none` prompts (split `test`) from the profile's router prompts.
 """
 
@@ -91,7 +91,7 @@ def main(args) -> None:
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--run", default="pilot_final")
+    ap.add_argument("--run", default="qwen4b_haiku_v3_test")
     ap.add_argument("--profile", choices=sorted(PROFILES), default=None, help="Base model (else $STEERING_PROFILE, else qwen06b)")
     ap.add_argument("--model", default=None, help="Model folder (else $QWEN_MODEL_PATH, the profile's WSL path, or the hub cache)")
     ap.add_argument("--limit", type=int, default=None, help="max prompts per behavior and for none")

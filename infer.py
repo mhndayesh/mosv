@@ -1,6 +1,6 @@
 """Answer one prompt: show the route, the steered answer and the unsteered answer.
 
-Run: python infer.py "Write a short story about a fox" --run pilot_final
+Run: python infer.py "Write a short story about a fox" --run qwen4b_haiku_v3_test
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ def main(args) -> None:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("prompt")
-    ap.add_argument("--run", default="pilot_final", help="folder under checkpoints/rl_pilot with the vectors")
+    ap.add_argument("--run", default="qwen4b_haiku_v3_test", help="folder under checkpoints/rl_pilot with the vectors")
     ap.add_argument("--model", default=None, help="Qwen3-0.6B folder (else $QWEN_MODEL_PATH, the WSL path, or the hub cache)")
     ap.add_argument("--force", choices=["engineering", "story", "teaching"], help="override the router's choice")
     ap.add_argument("--max-new-tokens", type=int, default=MAX_NEW_TOKENS)
