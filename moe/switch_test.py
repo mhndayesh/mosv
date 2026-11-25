@@ -6,7 +6,7 @@ plus, at each steer layer, out = MLP(x) + expert_k(x), k = argmax(gate x) (sigmo
 written by this replica; then one pass over the whole chat records the expert picked at every token.
 
 Run (Windows ROCm venv, one card): python moe/switch_test.py [--hf C:/llm/models/qwen3-4b-steer/hf]
-Writes, in data_review/reports/v4_switch/:
+Writes, in results/v4_switch/ (tracked in git):
 - summary.json: per chat part, the share of tokens per expert at each layer, and the runs at layer 27
 - <case>.tsv: one row per token: position, chat part, token text, expert at layer 9, 18, 27
 - <case>.txt: the whole chat as text, cut into pieces wherever the layer-27 expert changes, each piece
@@ -21,7 +21,7 @@ from pathlib import Path
 import torch
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / "data_review" / "reports" / "v4_switch"
+OUT = ROOT / "results" / "v4_switch"  # Tracked in git: only our test prompts and v4's answers.
 
 CASES = {
     "conversation: story -> debugging -> email": [

@@ -104,7 +104,7 @@ Not done yet: RL fine-tuning of the experts (not needed so far); a Q8_0 version 
 ## Topic switching test (2026-11-25, `moe/switch_test.py`)
 
 PyTorch replica of v4's maths (same gates and experts from `moe.pt`); per-token logs in
-`data_review/reports/v4_switch/` (`.tsv` every token x layer 9/18/27, `.txt` text split where layer 27 switches).
+`results/v4_switch/` (in git) (`.tsv` every token x layer 9/18/27, `.txt` text split where layer 27 switches).
 
 | Case | Part | Main expert (layer 27) |
 |---|---|---|

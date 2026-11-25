@@ -1,0 +1,338 @@
+pos	part	token	layer9	layer18	layer27
+0	user 1	"<|im_start|>"	none	none	none
+1	user 1	"user"	none	none	none
+2	user 1	"\n"	none	none	none
+3	user 1	"Ex"	teaching	teaching	teaching
+4	user 1	"plain"	teaching	teaching	teaching
+5	user 1	" in"	none	none	none
+6	user 1	" simple"	teaching	teaching	teaching
+7	user 1	" terms"	none	none	none
+8	user 1	" how"	none	teaching	teaching
+9	user 1	" photos"	none	none	none
+10	user 1	"ynthesis"	none	none	none
+11	user 1	" works"	explanation	explanation	none
+12	user 1	"."	none	none	none
+13	user 1	" Then"	none	none	none
+14	user 1	" write"	story	story	story
+15	user 1	" a"	none	none	none
+16	user 1	" short"	story	story	story
+17	user 1	" professional"	none	none	none
+18	user 1	" email"	none	professional_email	professional_email
+19	user 1	" to"	professional_email	none	none
+20	user 1	" my"	how_to_guide	how_to_guide	how_to_guide
+21	user 1	" manager"	none	none	professional_email
+22	user 1	" asking"	how_to_guide	how_to_guide	how_to_guide
+23	user 1	" for"	professional_email	engineering	professional_email
+24	user 1	" Friday"	professional_email	professional_email	none
+25	user 1	" off"	none	professional_email	none
+26	user 1	"."	story	none	how_to_guide
+27	user 1	"<|im_end|>"	none	none	none
+28	user 1	"\n"	none	none	none
+29	assistant 1	"<|im_start|>"	none	none	none
+30	assistant 1	"assistant"	none	none	none
+31	assistant 1	"\n"	story	none	none
+32	assistant 1	"**"	none	none	none
+33	assistant 1	"Simple"	none	none	none
+34	assistant 1	" Explanation"	none	none	none
+35	assistant 1	" of"	none	none	none
+36	assistant 1	" Photos"	none	none	none
+37	assistant 1	"ynthesis"	none	none	none
+38	assistant 1	":"	none	none	none
+39	assistant 1	"**\n\n"	none	none	none
+40	assistant 1	"Photos"	none	none	none
+41	assistant 1	"ynthesis"	none	none	none
+42	assistant 1	" is"	none	none	none
+43	assistant 1	" how"	how_to_guide	how_to_guide	none
+44	assistant 1	" plants"	none	none	none
+45	assistant 1	" make"	none	none	none
+46	assistant 1	" their"	none	none	none
+47	assistant 1	" own"	none	none	none
+48	assistant 1	" food"	none	none	none
+49	assistant 1	" using"	none	none	none
+50	assistant 1	" sunlight"	none	none	none
+51	assistant 1	"."	none	none	none
+52	assistant 1	" Here"	none	none	none
+53	assistant 1	"’s"	none	teaching	none
+54	assistant 1	" how"	none	none	none
+55	assistant 1	" it"	none	none	none
+56	assistant 1	" works"	explanation	none	none
+57	assistant 1	" in"	none	none	none
+58	assistant 1	" simple"	none	none	none
+59	assistant 1	" terms"	none	none	none
+60	assistant 1	":\n\n"	none	none	none
+61	assistant 1	"1"	none	none	none
+62	assistant 1	"."	none	none	none
+63	assistant 1	" Plants"	none	none	none
+64	assistant 1	" take"	none	none	none
+65	assistant 1	" in"	none	none	none
+66	assistant 1	" carbon"	none	none	none
+67	assistant 1	" dioxide"	none	none	none
+68	assistant 1	" ("	none	none	none
+69	assistant 1	"CO"	none	none	none
+70	assistant 1	"₂"	none	none	none
+71	assistant 1	")"	none	none	none
+72	assistant 1	" from"	none	none	none
+73	assistant 1	" the"	none	none	none
+74	assistant 1	" air"	none	none	none
+75	assistant 1	" through"	none	none	none
+76	assistant 1	" their"	none	none	none
+77	assistant 1	" leaves"	none	none	none
+78	assistant 1	".\n"	none	none	none
+79	assistant 1	"2"	none	none	none
+80	assistant 1	"."	none	none	none
+81	assistant 1	" They"	none	none	none
+82	assistant 1	" also"	none	none	none
+83	assistant 1	" take"	none	none	none
+84	assistant 1	" in"	none	none	none
+85	assistant 1	" water"	none	none	none
+86	assistant 1	" ("	none	none	none
+87	assistant 1	"H"	none	none	none
+88	assistant 1	"₂"	none	none	none
+89	assistant 1	"O"	none	none	none
+90	assistant 1	")"	explanation	none	none
+91	assistant 1	" from"	none	none	none
+92	assistant 1	" the"	none	none	none
+93	assistant 1	" soil"	none	none	none
+94	assistant 1	" through"	none	none	none
+95	assistant 1	" their"	none	none	none
+96	assistant 1	" roots"	none	none	none
+97	assistant 1	".\n"	none	none	none
+98	assistant 1	"3"	none	none	none
+99	assistant 1	"."	none	none	none
+100	assistant 1	" Using"	none	none	none
+101	assistant 1	" sunlight"	none	none	none
+102	assistant 1	" ("	none	none	none
+103	assistant 1	"which"	none	none	none
+104	assistant 1	" comes"	none	none	none
+105	assistant 1	" from"	none	none	none
+106	assistant 1	" the"	none	none	none
+107	assistant 1	" sun"	none	none	none
+108	assistant 1	" and"	none	none	none
+109	assistant 1	" is"	none	none	none
+110	assistant 1	" captured"	none	none	none
+111	assistant 1	" by"	none	none	none
+112	assistant 1	" green"	none	none	none
+113	assistant 1	" parts"	teaching	teaching	none
+114	assistant 1	" of"	teaching	none	none
+115	assistant 1	" the"	none	none	none
+116	assistant 1	" plant"	none	none	none
+117	assistant 1	","	none	none	none
+118	assistant 1	" like"	teaching	teaching	none
+119	assistant 1	" leaves"	none	none	none
+120	assistant 1	"),"	none	none	none
+121	assistant 1	" the"	none	none	none
+122	assistant 1	" plant"	none	none	none
+123	assistant 1	" combines"	none	none	none
+124	assistant 1	" the"	none	none	none
+125	assistant 1	" carbon"	none	none	none
+126	assistant 1	" dioxide"	none	none	none
+127	assistant 1	" and"	none	none	none
+128	assistant 1	" water"	none	none	none
+129	assistant 1	".\n"	none	none	none
+130	assistant 1	"4"	none	none	none
+131	assistant 1	"."	none	none	none
+132	assistant 1	" This"	none	none	none
+133	assistant 1	" process"	none	none	none
+134	assistant 1	" creates"	none	none	none
+135	assistant 1	" glucose"	none	none	none
+136	assistant 1	" —"	none	none	none
+137	assistant 1	" a"	none	none	none
+138	assistant 1	" type"	none	none	none
+139	assistant 1	" of"	none	none	none
+140	assistant 1	" sugar"	none	none	none
+141	assistant 1	" that"	none	none	none
+142	assistant 1	" the"	none	none	none
+143	assistant 1	" plant"	none	none	none
+144	assistant 1	" uses"	none	none	none
+145	assistant 1	" for"	none	none	none
+146	assistant 1	" energy"	none	none	none
+147	assistant 1	" and"	none	none	none
+148	assistant 1	" growth"	none	none	none
+149	assistant 1	".\n"	none	none	none
+150	assistant 1	"5"	none	none	none
+151	assistant 1	"."	none	none	none
+152	assistant 1	" As"	none	none	none
+153	assistant 1	" a"	none	none	none
+154	assistant 1	" by"	none	none	none
+155	assistant 1	"product"	none	none	none
+156	assistant 1	","	none	none	none
+157	assistant 1	" the"	none	none	none
+158	assistant 1	" plant"	none	none	none
+159	assistant 1	" releases"	none	none	none
+160	assistant 1	" oxygen"	none	none	none
+161	assistant 1	" ("	none	none	none
+162	assistant 1	"O"	none	none	none
+163	assistant 1	"₂"	none	none	none
+164	assistant 1	")"	none	none	none
+165	assistant 1	" into"	none	none	none
+166	assistant 1	" the"	none	none	none
+167	assistant 1	" air"	none	none	none
+168	assistant 1	","	none	none	none
+169	assistant 1	" which"	none	none	none
+170	assistant 1	" we"	none	none	none
+171	assistant 1	" breathe"	none	none	none
+172	assistant 1	".\n\n"	none	none	none
+173	assistant 1	"So"	none	none	none
+174	assistant 1	","	teaching	none	none
+175	assistant 1	" in"	none	none	none
+176	assistant 1	" short"	none	none	none
+177	assistant 1	":"	none	none	none
+178	assistant 1	" **"	none	none	none
+179	assistant 1	"Pl"	none	none	none
+180	assistant 1	"ants"	none	none	none
+181	assistant 1	" use"	none	none	none
+182	assistant 1	" sunlight"	none	none	none
+183	assistant 1	","	teaching	none	none
+184	assistant 1	" water"	none	none	none
+185	assistant 1	","	none	none	none
+186	assistant 1	" and"	none	none	none
+187	assistant 1	" carbon"	none	none	none
+188	assistant 1	" dioxide"	none	none	none
+189	assistant 1	" to"	none	none	none
+190	assistant 1	" make"	none	none	none
+191	assistant 1	" food"	none	none	none
+192	assistant 1	" and"	none	none	none
+193	assistant 1	" release"	none	none	none
+194	assistant 1	" oxygen"	none	none	none
+195	assistant 1	"."	none	none	none
+196	assistant 1	"**\n\n"	none	none	none
+197	assistant 1	"---\n\n"	none	none	professional_email
+198	assistant 1	"**"	none	none	none
+199	assistant 1	"Professional"	none	none	none
+200	assistant 1	" Email"	professional_email	none	none
+201	assistant 1	" to"	none	none	none
+202	assistant 1	" Manager"	none	none	none
+203	assistant 1	":"	none	professional_email	none
+204	assistant 1	"**\n\n"	none	professional_email	professional_email
+205	assistant 1	"Subject"	professional_email	professional_email	professional_email
+206	assistant 1	":"	professional_email	professional_email	professional_email
+207	assistant 1	" Request"	none	professional_email	professional_email
+208	assistant 1	" for"	professional_email	professional_email	none
+209	assistant 1	" Friday"	none	none	none
+210	assistant 1	" Off"	none	none	none
+211	assistant 1	"  \n\n"	professional_email	professional_email	professional_email
+212	assistant 1	"Dear"	professional_email	professional_email	none
+213	assistant 1	" ["	professional_email	professional_email	none
+214	assistant 1	"Manager"	none	none	none
+215	assistant 1	"'s"	none	none	none
+216	assistant 1	" Name"	none	professional_email	professional_email
+217	assistant 1	"],"	professional_email	none	professional_email
+218	assistant 1	"  \n\n"	professional_email	professional_email	professional_email
+219	assistant 1	"I"	professional_email	none	professional_email
+220	assistant 1	" hope"	professional_email	professional_email	none
+221	assistant 1	" you"	professional_email	professional_email	none
+222	assistant 1	"'re"	professional_email	professional_email	none
+223	assistant 1	" doing"	none	none	none
+224	assistant 1	" well"	none	professional_email	none
+225	assistant 1	"."	professional_email	professional_email	professional_email
+226	assistant 1	" I"	professional_email	professional_email	professional_email
+227	assistant 1	"’d"	none	professional_email	professional_email
+228	assistant 1	" like"	professional_email	professional_email	teaching
+229	assistant 1	" to"	professional_email	professional_email	professional_email
+230	assistant 1	" kindly"	professional_email	professional_email	professional_email
+231	assistant 1	" request"	none	professional_email	professional_email
+232	assistant 1	" Friday"	none	none	none
+233	assistant 1	","	professional_email	professional_email	none
+234	assistant 1	" ["	professional_email	none	none
+235	assistant 1	"insert"	none	none	none
+236	assistant 1	" date"	how_to_guide	how_to_guide	how_to_guide
+237	assistant 1	"],"	professional_email	professional_email	none
+238	assistant 1	" off"	none	none	none
+239	assistant 1	" for"	none	none	none
+240	assistant 1	" personal"	none	none	none
+241	assistant 1	" reasons"	professional_email	none	none
+242	assistant 1	"."	professional_email	professional_email	none
+243	assistant 1	"  \n\n"	professional_email	professional_email	none
+244	assistant 1	"I"	professional_email	professional_email	none
+245	assistant 1	"’ve"	none	professional_email	none
+246	assistant 1	" completed"	none	none	none
+247	assistant 1	" all"	none	none	none
+248	assistant 1	" my"	none	none	none
+249	assistant 1	" current"	none	none	none
+250	assistant 1	" tasks"	none	none	none
+251	assistant 1	" and"	none	none	none
+252	assistant 1	" will"	professional_email	none	none
+253	assistant 1	" ensure"	none	none	none
+254	assistant 1	" everything"	none	none	none
+255	assistant 1	" is"	none	none	none
+256	assistant 1	" up"	none	none	none
+257	assistant 1	" to"	none	none	none
+258	assistant 1	" date"	none	none	none
+259	assistant 1	" before"	none	none	none
+260	assistant 1	" I"	none	none	none
+261	assistant 1	" leave"	none	none	none
+262	assistant 1	"."	professional_email	none	none
+263	assistant 1	" I"	none	none	none
+264	assistant 1	"’m"	none	professional_email	none
+265	assistant 1	" also"	none	none	none
+266	assistant 1	" happy"	none	none	none
+267	assistant 1	" to"	none	none	none
+268	assistant 1	" assist"	none	none	none
+269	assistant 1	" with"	none	none	none
+270	assistant 1	" any"	none	none	none
+271	assistant 1	" hand"	none	none	none
+272	assistant 1	"over"	none	none	none
+273	assistant 1	" or"	professional_email	none	none
+274	assistant 1	" pending"	none	none	none
+275	assistant 1	" work"	none	none	none
+276	assistant 1	" if"	none	none	none
+277	assistant 1	" needed"	none	none	none
+278	assistant 1	"."	professional_email	none	none
+279	assistant 1	"  \n\n"	professional_email	professional_email	professional_email
+280	assistant 1	"Please"	professional_email	professional_email	professional_email
+281	assistant 1	" let"	professional_email	professional_email	professional_email
+282	assistant 1	" me"	professional_email	professional_email	professional_email
+283	assistant 1	" know"	professional_email	professional_email	professional_email
+284	assistant 1	" if"	none	professional_email	professional_email
+285	assistant 1	" this"	professional_email	professional_email	how_to_guide
+286	assistant 1	" request"	none	professional_email	professional_email
+287	assistant 1	" works"	none	professional_email	none
+288	assistant 1	" for"	none	professional_email	none
+289	assistant 1	" you"	professional_email	professional_email	professional_email
+290	assistant 1	" or"	none	professional_email	none
+291	assistant 1	" if"	none	none	professional_email
+292	assistant 1	" you"	professional_email	professional_email	none
+293	assistant 1	"’d"	none	none	none
+294	assistant 1	" like"	professional_email	professional_email	none
+295	assistant 1	" to"	none	none	professional_email
+296	assistant 1	" discuss"	none	professional_email	none
+297	assistant 1	" it"	professional_email	none	none
+298	assistant 1	" further"	professional_email	professional_email	professional_email
+299	assistant 1	"."	professional_email	professional_email	professional_email
+300	assistant 1	" I"	none	professional_email	none
+301	assistant 1	"’ll"	professional_email	professional_email	none
+302	assistant 1	" be"	professional_email	professional_email	none
+303	assistant 1	" available"	professional_email	professional_email	none
+304	assistant 1	" to"	none	none	none
+305	assistant 1	" respond"	professional_email	professional_email	none
+306	assistant 1	" to"	none	none	none
+307	assistant 1	" urgent"	none	professional_email	none
+308	assistant 1	" matters"	none	professional_email	none
+309	assistant 1	" if"	none	professional_email	none
+310	assistant 1	" required"	professional_email	professional_email	none
+311	assistant 1	"."	none	professional_email	none
+312	assistant 1	"  \n\n"	professional_email	professional_email	professional_email
+313	assistant 1	"Thank"	professional_email	professional_email	none
+314	assistant 1	" you"	professional_email	professional_email	none
+315	assistant 1	" for"	professional_email	none	teaching
+316	assistant 1	" your"	professional_email	professional_email	professional_email
+317	assistant 1	" consideration"	none	professional_email	none
+318	assistant 1	"."	professional_email	professional_email	professional_email
+319	assistant 1	"  \n\n"	professional_email	professional_email	professional_email
+320	assistant 1	"Best"	professional_email	professional_email	professional_email
+321	assistant 1	" regards"	professional_email	professional_email	professional_email
+322	assistant 1	","	professional_email	none	professional_email
+323	assistant 1	"  \n"	professional_email	professional_email	professional_email
+324	assistant 1	"["	professional_email	professional_email	professional_email
+325	assistant 1	"Your"	none	professional_email	professional_email
+326	assistant 1	" Full"	none	professional_email	professional_email
+327	assistant 1	" Name"	none	professional_email	none
+328	assistant 1	"]"	professional_email	professional_email	none
+329	assistant 1	"  \n"	professional_email	professional_email	none
+330	assistant 1	"["	none	professional_email	none
+331	assistant 1	"Your"	none	professional_email	none
+332	assistant 1	" Job"	professional_email	none	none
+333	assistant 1	" Title"	how_to_guide	professional_email	none
+334	assistant 1	"]"	professional_email	professional_email	none
+335	assistant 1	"<|im_end|>"	none	none	none
+336	assistant 1	"\n"	none	none	none

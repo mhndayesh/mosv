@@ -1,0 +1,301 @@
+pos	part	token	layer9	layer18	layer27
+0	user 1	"<|im_start|>"	none	none	none
+1	user 1	"user"	none	none	none
+2	user 1	"\n"	none	none	none
+3	user 1	"First"	story	story	story
+4	user 1	","	story	story	story
+5	user 1	" write"	story	story	story
+6	user 1	" a"	story	story	story
+7	user 1	" four"	none	story	story
+8	user 1	"-line"	how_to_guide	none	none
+9	user 1	" poem"	none	none	none
+10	user 1	" about"	none	none	none
+11	user 1	" autumn"	none	none	none
+12	user 1	" leaves"	none	none	none
+13	user 1	"."	none	none	none
+14	user 1	" Second"	story	story	story
+15	user 1	","	story	story	story
+16	user 1	" my"	story	story	story
+17	user 1	" JavaScript"	engineering	engineering	engineering
+18	user 1	" function"	engineering	engineering	engineering
+19	user 1	" returns"	engineering	engineering	engineering
+20	user 1	" undefined"	engineering	debugging	debugging
+21	user 1	" instead"	debugging	debugging	debugging
+22	user 1	" of"	debugging	debugging	engineering
+23	user 1	" the"	debugging	debugging	engineering
+24	user 1	" sum"	none	engineering	engineering
+25	user 1	":"	debugging	debugging	engineering
+26	user 1	" function"	debugging	debugging	engineering
+27	user 1	" add"	engineering	engineering	engineering
+28	user 1	"(a"	engineering	debugging	debugging
+29	user 1	","	engineering	debugging	engineering
+30	user 1	" b"	story	engineering	none
+31	user 1	")"	debugging	debugging	debugging
+32	user 1	" {"	debugging	debugging	debugging
+33	user 1	" a"	engineering	engineering	engineering
+34	user 1	" +"	engineering	engineering	engineering
+35	user 1	" b"	engineering	engineering	engineering
+36	user 1	" }."	engineering	engineering	engineering
+37	user 1	" Explain"	debugging	debugging	debugging
+38	user 1	" the"	engineering	debugging	engineering
+39	user 1	" bug"	debugging	debugging	debugging
+40	user 1	" and"	debugging	debugging	debugging
+41	user 1	" fix"	debugging	debugging	debugging
+42	user 1	" it"	debugging	debugging	debugging
+43	user 1	"."	debugging	debugging	engineering
+44	user 1	"<|im_end|>"	engineering	none	none
+45	user 1	"\n"	engineering	none	none
+46	assistant 1	"<|im_start|>"	engineering	debugging	engineering
+47	assistant 1	"assistant"	engineering	none	none
+48	assistant 1	"\n"	engineering	none	none
+49	assistant 1	"**"	none	none	none
+50	assistant 1	"Four"	none	none	none
+51	assistant 1	"-line"	none	none	none
+52	assistant 1	" poem"	none	none	none
+53	assistant 1	" about"	none	none	none
+54	assistant 1	" autumn"	none	none	none
+55	assistant 1	" leaves"	engineering	none	none
+56	assistant 1	":**"	none	none	none
+57	assistant 1	"  \n"	none	none	none
+58	assistant 1	"C"	none	none	none
+59	assistant 1	"rim"	none	none	none
+60	assistant 1	"son"	none	none	none
+61	assistant 1	" and"	none	none	none
+62	assistant 1	" gold"	none	none	none
+63	assistant 1	" drift"	none	none	none
+64	assistant 1	" on"	none	none	none
+65	assistant 1	" the"	none	none	none
+66	assistant 1	" breeze"	none	none	none
+67	assistant 1	","	none	none	none
+68	assistant 1	"  \n"	none	none	none
+69	assistant 1	"Wh"	none	none	none
+70	assistant 1	"isper"	none	none	none
+71	assistant 1	"ing"	none	none	none
+72	assistant 1	" down"	none	none	none
+73	assistant 1	" in"	none	none	none
+74	assistant 1	" silent"	none	none	none
+75	assistant 1	" flight"	none	none	none
+76	assistant 1	","	none	none	none
+77	assistant 1	"  \n"	none	none	none
+78	assistant 1	"They"	none	none	none
+79	assistant 1	" dance"	none	none	none
+80	assistant 1	" on"	none	none	none
+81	assistant 1	" wind"	none	none	none
+82	assistant 1	" before"	none	none	none
+83	assistant 1	" they"	none	none	none
+84	assistant 1	" meet"	none	none	none
+85	assistant 1	" the"	none	none	none
+86	assistant 1	" ground"	none	none	none
+87	assistant 1	","	none	none	none
+88	assistant 1	"  \n"	none	none	none
+89	assistant 1	"A"	none	none	none
+90	assistant 1	" fleeting"	none	none	none
+91	assistant 1	" beauty"	none	none	none
+92	assistant 1	","	none	none	none
+93	assistant 1	" soft"	none	none	none
+94	assistant 1	" and"	none	none	none
+95	assistant 1	" bright"	none	none	none
+96	assistant 1	".\n\n"	none	none	none
+97	assistant 1	"---\n\n"	none	none	none
+98	assistant 1	"**"	none	none	engineering
+99	assistant 1	"Bug"	debugging	debugging	debugging
+100	assistant 1	" Explanation"	debugging	none	none
+101	assistant 1	":**"	debugging	none	none
+102	assistant 1	"  \n"	none	none	none
+103	assistant 1	"The"	engineering	none	none
+104	assistant 1	" function"	engineering	debugging	none
+105	assistant 1	" `"	debugging	debugging	engineering
+106	assistant 1	"add"	debugging	debugging	none
+107	assistant 1	"(a"	debugging	debugging	debugging
+108	assistant 1	","	debugging	debugging	debugging
+109	assistant 1	" b"	engineering	engineering	none
+110	assistant 1	")`"	debugging	debugging	debugging
+111	assistant 1	" currently"	debugging	debugging	engineering
+112	assistant 1	" returns"	engineering	debugging	none
+113	assistant 1	" `"	debugging	debugging	engineering
+114	assistant 1	"undefined"	debugging	debugging	debugging
+115	assistant 1	"`"	debugging	debugging	debugging
+116	assistant 1	" because"	debugging	debugging	none
+117	assistant 1	" it"	debugging	debugging	debugging
+118	assistant 1	" performs"	engineering	debugging	engineering
+119	assistant 1	" `"	debugging	debugging	debugging
+120	assistant 1	"a"	engineering	debugging	none
+121	assistant 1	" +"	debugging	debugging	debugging
+122	assistant 1	" b"	debugging	debugging	none
+123	assistant 1	"`"	debugging	debugging	none
+124	assistant 1	" as"	none	debugging	none
+125	assistant 1	" an"	engineering	debugging	none
+126	assistant 1	" expression"	engineering	debugging	debugging
+127	assistant 1	" and"	debugging	debugging	debugging
+128	assistant 1	" **"	debugging	debugging	debugging
+129	assistant 1	"does"	debugging	debugging	debugging
+130	assistant 1	" not"	debugging	debugging	debugging
+131	assistant 1	" assign"	debugging	debugging	debugging
+132	assistant 1	" the"	debugging	debugging	engineering
+133	assistant 1	" result"	debugging	debugging	debugging
+134	assistant 1	" to"	debugging	debugging	none
+135	assistant 1	" a"	debugging	debugging	none
+136	assistant 1	" return"	debugging	debugging	none
+137	assistant 1	" value"	debugging	debugging	debugging
+138	assistant 1	"**"	debugging	debugging	debugging
+139	assistant 1	"."	debugging	debugging	debugging
+140	assistant 1	" JavaScript"	debugging	debugging	debugging
+141	assistant 1	" only"	debugging	debugging	debugging
+142	assistant 1	" returns"	debugging	debugging	none
+143	assistant 1	" `"	debugging	debugging	engineering
+144	assistant 1	"undefined"	teaching	debugging	debugging
+145	assistant 1	"`"	debugging	debugging	debugging
+146	assistant 1	" if"	debugging	debugging	debugging
+147	assistant 1	" the"	engineering	debugging	none
+148	assistant 1	" function"	none	debugging	none
+149	assistant 1	" explicitly"	debugging	debugging	debugging
+150	assistant 1	" `"	debugging	debugging	debugging
+151	assistant 1	"return"	debugging	debugging	debugging
+152	assistant 1	"`s"	debugging	debugging	none
+153	assistant 1	" something"	debugging	debugging	none
+154	assistant 1	"—or"	debugging	debugging	none
+155	assistant 1	" if"	debugging	debugging	debugging
+156	assistant 1	" it"	debugging	debugging	debugging
+157	assistant 1	" reaches"	debugging	debugging	debugging
+158	assistant 1	" the"	none	debugging	debugging
+159	assistant 1	" end"	debugging	debugging	debugging
+160	assistant 1	" without"	debugging	debugging	debugging
+161	assistant 1	" a"	debugging	debugging	debugging
+162	assistant 1	" `"	debugging	debugging	debugging
+163	assistant 1	"return"	debugging	debugging	debugging
+164	assistant 1	"`"	debugging	debugging	debugging
+165	assistant 1	" statement"	debugging	debugging	debugging
+166	assistant 1	"."	debugging	debugging	debugging
+167	assistant 1	" In"	debugging	debugging	debugging
+168	assistant 1	" your"	debugging	debugging	debugging
+169	assistant 1	" code"	debugging	debugging	debugging
+170	assistant 1	","	debugging	debugging	debugging
+171	assistant 1	" `"	debugging	debugging	debugging
+172	assistant 1	"a"	debugging	debugging	engineering
+173	assistant 1	" +"	debugging	debugging	debugging
+174	assistant 1	" b"	debugging	debugging	debugging
+175	assistant 1	"`"	debugging	debugging	debugging
+176	assistant 1	" is"	debugging	debugging	debugging
+177	assistant 1	" evaluated"	engineering	debugging	debugging
+178	assistant 1	","	debugging	debugging	debugging
+179	assistant 1	" but"	debugging	debugging	debugging
+180	assistant 1	" not"	debugging	debugging	debugging
+181	assistant 1	" returned"	debugging	debugging	debugging
+182	assistant 1	"."	debugging	debugging	debugging
+183	assistant 1	" So"	debugging	debugging	debugging
+184	assistant 1	" even"	debugging	debugging	debugging
+185	assistant 1	" if"	debugging	debugging	engineering
+186	assistant 1	" `"	debugging	debugging	debugging
+187	assistant 1	"a"	debugging	debugging	none
+188	assistant 1	"`"	engineering	debugging	none
+189	assistant 1	" and"	none	debugging	none
+190	assistant 1	" `"	engineering	engineering	engineering
+191	assistant 1	"b"	engineering	none	none
+192	assistant 1	"`"	debugging	debugging	debugging
+193	assistant 1	" are"	debugging	debugging	debugging
+194	assistant 1	" numbers"	engineering	none	engineering
+195	assistant 1	","	debugging	debugging	debugging
+196	assistant 1	" the"	debugging	debugging	debugging
+197	assistant 1	" function"	none	debugging	debugging
+198	assistant 1	" will"	debugging	debugging	debugging
+199	assistant 1	" still"	debugging	debugging	debugging
+200	assistant 1	" return"	debugging	debugging	debugging
+201	assistant 1	" `"	debugging	debugging	debugging
+202	assistant 1	"undefined"	debugging	debugging	debugging
+203	assistant 1	"`"	debugging	debugging	debugging
+204	assistant 1	" unless"	debugging	debugging	debugging
+205	assistant 1	" you"	debugging	debugging	debugging
+206	assistant 1	" add"	debugging	debugging	debugging
+207	assistant 1	" a"	debugging	debugging	debugging
+208	assistant 1	" `"	debugging	debugging	debugging
+209	assistant 1	"return"	debugging	engineering	engineering
+210	assistant 1	" a"	debugging	debugging	engineering
+211	assistant 1	" +"	debugging	engineering	engineering
+212	assistant 1	" b"	debugging	debugging	debugging
+213	assistant 1	";"	debugging	debugging	debugging
+214	assistant 1	"`"	debugging	debugging	debugging
+215	assistant 1	" statement"	debugging	debugging	debugging
+216	assistant 1	".\n\n"	none	none	none
+217	assistant 1	"**"	none	debugging	debugging
+218	assistant 1	"Fix"	debugging	debugging	debugging
+219	assistant 1	":**"	debugging	debugging	debugging
+220	assistant 1	"  \n"	none	none	none
+221	assistant 1	"Add"	none	none	none
+222	assistant 1	" the"	none	engineering	debugging
+223	assistant 1	" `"	debugging	debugging	debugging
+224	assistant 1	"return"	debugging	engineering	engineering
+225	assistant 1	"`"	debugging	math_solving	math_solving
+226	assistant 1	" keyword"	how_to_guide	how_to_guide	how_to_guide
+227	assistant 1	" to"	debugging	debugging	debugging
+228	assistant 1	" explicitly"	debugging	debugging	debugging
+229	assistant 1	" return"	debugging	none	none
+230	assistant 1	" the"	none	none	engineering
+231	assistant 1	" sum"	none	none	none
+232	assistant 1	":\n\n"	none	debugging	none
+233	assistant 1	"```"	none	debugging	engineering
+234	assistant 1	"javascript"	engineering	engineering	engineering
+235	assistant 1	"\n"	none	none	engineering
+236	assistant 1	"function"	none	none	engineering
+237	assistant 1	" add"	none	none	none
+238	assistant 1	"(a"	engineering	none	none
+239	assistant 1	","	none	debugging	debugging
+240	assistant 1	" b"	explanation	engineering	none
+241	assistant 1	")"	debugging	debugging	none
+242	assistant 1	" {\n"	debugging	debugging	none
+243	assistant 1	" "	engineering	engineering	engineering
+244	assistant 1	" return"	engineering	engineering	engineering
+245	assistant 1	" a"	engineering	engineering	engineering
+246	assistant 1	" +"	engineering	engineering	engineering
+247	assistant 1	" b"	none	engineering	engineering
+248	assistant 1	";\n"	debugging	debugging	engineering
+249	assistant 1	"}\n"	engineering	debugging	debugging
+250	assistant 1	"``"	none	none	none
+251	assistant 1	"`\n\n"	none	debugging	debugging
+252	assistant 1	"Now"	none	debugging	engineering
+253	assistant 1	","	debugging	debugging	engineering
+254	assistant 1	" calling"	engineering	debugging	debugging
+255	assistant 1	" `"	none	engineering	engineering
+256	assistant 1	"add"	none	none	none
+257	assistant 1	"("	explanation	none	none
+258	assistant 1	"2"	none	none	none
+259	assistant 1	","	explanation	none	engineering
+260	assistant 1	" "	none	none	none
+261	assistant 1	"3"	none	none	engineering
+262	assistant 1	")`"	debugging	debugging	debugging
+263	assistant 1	" will"	engineering	none	engineering
+264	assistant 1	" return"	engineering	none	engineering
+265	assistant 1	" `"	debugging	none	engineering
+266	assistant 1	"5"	debugging	none	engineering
+267	assistant 1	"`,"	debugging	debugging	debugging
+268	assistant 1	" not"	how_to_guide	how_to_guide	how_to_guide
+269	assistant 1	" `"	debugging	debugging	engineering
+270	assistant 1	"undefined"	debugging	debugging	debugging
+271	assistant 1	"`."	how_to_guide	how_to_guide	how_to_guide
+272	assistant 1	"  \n"	none	none	none
+273	assistant 1	"✅"	none	none	debugging
+274	assistant 1	" This"	none	debugging	debugging
+275	assistant 1	" is"	debugging	debugging	debugging
+276	assistant 1	" a"	debugging	debugging	debugging
+277	assistant 1	" common"	debugging	debugging	debugging
+278	assistant 1	" beginner"	debugging	debugging	debugging
+279	assistant 1	" mistake"	debugging	debugging	debugging
+280	assistant 1	"—"	debugging	debugging	debugging
+281	assistant 1	"eval"	debugging	debugging	debugging
+282	assistant 1	"uating"	debugging	debugging	debugging
+283	assistant 1	" an"	debugging	debugging	debugging
+284	assistant 1	" expression"	debugging	debugging	debugging
+285	assistant 1	" vs"	debugging	debugging	debugging
+286	assistant 1	"."	debugging	debugging	debugging
+287	assistant 1	" returning"	debugging	debugging	debugging
+288	assistant 1	" it"	debugging	debugging	debugging
+289	assistant 1	"."	debugging	debugging	debugging
+290	assistant 1	" Always"	debugging	debugging	debugging
+291	assistant 1	" verify"	debugging	debugging	debugging
+292	assistant 1	" the"	debugging	debugging	debugging
+293	assistant 1	" function"	none	debugging	debugging
+294	assistant 1	"'s"	debugging	debugging	debugging
+295	assistant 1	" return"	debugging	debugging	debugging
+296	assistant 1	" statement"	debugging	debugging	debugging
+297	assistant 1	"."	debugging	debugging	debugging
+298	assistant 1	"<|im_end|>"	none	none	none
+299	assistant 1	"\n"	none	none	none

@@ -1,0 +1,123 @@
+[none] <|im_start|>user
+
+[story] First, write a four
+[none] -line poem about autumn leaves.
+[story]  Second, my
+[engineering]  JavaScript function returns
+[debugging]  undefined instead
+[engineering]  of the sum: function add
+[debugging] (a
+[engineering] ,
+[none]  b
+[debugging] ) {
+[engineering]  a + b }.
+[debugging]  Explain
+[engineering]  the
+[debugging]  bug and fix it
+[engineering] .
+[none] <|im_end|>
+
+[engineering] <|im_start|>
+[none] assistant
+**Four-line poem about autumn leaves:**  
+Crimson and gold drift on the breeze,  
+Whispering down in silent flight,  
+They dance on wind before they meet the ground,  
+A fleeting beauty, soft and bright.
+
+---
+
+
+[engineering] **
+[debugging] Bug
+[none]  Explanation:**  
+The function
+[engineering]  `
+[none] add
+[debugging] (a,
+[none]  b
+[debugging] )`
+[engineering]  currently
+[none]  returns
+[engineering]  `
+[debugging] undefined`
+[none]  because
+[debugging]  it
+[engineering]  performs
+[debugging]  `
+[none] a
+[debugging]  +
+[none]  b` as an
+[debugging]  expression and **does not assign
+[engineering]  the
+[debugging]  result
+[none]  to a return
+[debugging]  value**. JavaScript only
+[none]  returns
+[engineering]  `
+[debugging] undefined` if
+[none]  the function
+[debugging]  explicitly `return
+[none] `s something—or
+[debugging]  if it reaches the end without a `return` statement. In your code, `
+[engineering] a
+[debugging]  + b` is evaluated, but not returned. So even
+[engineering]  if
+[debugging]  `
+[none] a` and
+[engineering]  `
+[none] b
+[debugging] ` are
+[engineering]  numbers
+[debugging] , the function will still return `undefined` unless you add a `
+[engineering] return a +
+[debugging]  b;` statement
+[none] .
+
+
+[debugging] **Fix:**
+[none]   
+Add
+[debugging]  the `
+[engineering] return
+[math_solving] `
+[how_to_guide]  keyword
+[debugging]  to explicitly
+[none]  return
+[engineering]  the
+[none]  sum:
+
+
+[engineering] ```javascript
+function
+[none]  add(a
+[debugging] ,
+[none]  b) {
+
+[engineering]   return a + b;
+
+[debugging] }
+
+[none] ``
+[debugging] `
+
+
+[engineering] Now,
+[debugging]  calling
+[engineering]  `
+[none] add(2
+[engineering] ,
+[none]  
+[engineering] 3
+[debugging] )`
+[engineering]  will return `5
+[debugging] `,
+[how_to_guide]  not
+[engineering]  `
+[debugging] undefined
+[how_to_guide] `.
+[none]   
+
+[debugging] ✅ This is a common beginner mistake—evaluating an expression vs. returning it. Always verify the function's return statement.
+[none] <|im_end|>
+
