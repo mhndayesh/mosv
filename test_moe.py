@@ -52,6 +52,25 @@ class TestTrainSettings(unittest.TestCase):
         self.assertEqual(train.parse_args(["--seed", "3"]).seed, 3)
 
 
+@unittest.skipUnless(importlib.util.find_spec("torch") is not None, "needs torch")
+class TestSwitchLogs(unittest.TestCase):
+    def test_text_log_starts_a_new_piece_where_the_last_layer_switches(self):
+        import switch_test
+
+        names = ["none", "story", "debugging"]
+        tok = SimpleNamespace(decode=lambda ids: f"t{ids[0]} ")
+        picks = {9: [0, 1, 1, 2], 27: [1, 1, 2, 2]}
+        with tempfile.TemporaryDirectory() as tmp:
+            switch_test.OUT = Path(tmp)
+            switch_test.write_logs("c", tok, [5, 6, 7, 8], [("user 1", 0, 2), ("assistant 1", 2, 4)], picks, names)
+            text = (Path(tmp) / "c.txt").read_text(encoding="utf-8")
+            tsv = (Path(tmp) / "c.tsv").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(text, "[story] t5 t6 \n[debugging] t7 t8 \n")
+        self.assertEqual(tsv[0], "pos\tpart\ttoken\tlayer9\tlayer27")
+        self.assertEqual(tsv[3], '2\tassistant 1\t"t7 "\tstory\tdebugging')  # layer 9 still story, layer 27 switched
+        self.assertEqual(switch_test.runs([1, 1, 1, 2, 2, 2, 2, 0], names), ["story x3", "debugging x4"])
+
+
 class TestFullTestSettings(unittest.TestCase):
     def test_llama_server_path_can_be_chosen(self):
         import full_test
