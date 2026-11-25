@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import random
+import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -39,25 +40,27 @@ class TopicState:
 
 
 def mixed_schedule(counts: dict[str, int], seed: int) -> list[str]:
-    """A shuffled order with each topic's exact count, avoiding the same topic twice in a row while possible."""
-    rng, left, order, last = random.Random(seed), {topic: counts[topic] for topic in sorted(counts)}, [], None
-    while any(left.values()):
-        choices = [topic for topic, count in left.items() if count and topic != last] or [last]
-        last = rng.choices(choices, weights=[left[topic] for topic in choices])[0]
-        left[last] -= 1
-        order.append(last)
-    return order
+    """Each topic's exact count, spread evenly across the whole run so every topic keeps rotating to the end.
+
+    Topic t's k-th update sits at (k + offset_t) / count_t; sorting those points interleaves the topics in
+    proportion. A random pick that forbade repeats used up the small topics early and left the big one alone
+    at the end (423 debugging updates in a row on 2026-11-25).
+    """
+    rng = random.Random(seed)
+    points = []
+    for topic in sorted(counts):
+        offset = rng.random()
+        points += [((k + offset) / counts[topic], rng.random(), topic) for k in range(counts[topic])]
+    return [topic for _, _, topic in sorted(points)]
 
 
-def remaining_schedule(order: list[str], done: dict[str, int]) -> list[str]:
-    """Drop the updates each topic already finished, so a resumed run continues the same order."""
-    skipped, out = dict.fromkeys(done, 0), []
-    for topic in order:
-        if skipped.get(topic, 0) < done.get(topic, 0):
-            skipped[topic] += 1
-        else:
-            out.append(topic)
-    return out
+def resume_schedule(totals: dict[str, int], done: dict[str, int], seed: int) -> list[str]:
+    """Shuffle only the updates each topic has left, so a resumed run keeps rotating.
+
+    Replaying the full order and skipping finished updates from the front broke rotation when the topic set
+    changed: resuming 3 of 8 topics gave 17 teaching updates in a row and no debugging at all.
+    """
+    return mixed_schedule({topic: totals[topic] - done.get(topic, 0) for topic in totals}, seed)
 
 
 def rows_for(state: TopicState, step: int, prompts: int) -> list[dict]:
@@ -138,6 +141,14 @@ def dev_check(run, bank, state: TopicState) -> None:
                                  state.step, state.base_dev, state.expert, state.best)
     state.vector = bank.vectors[0].detach().clone()
     save_topic(run, bank, state)
+    keep_snapshot(state)
+
+
+def keep_snapshot(state: TopicState) -> None:
+    """Keep a copy at every dev check, so any earlier point can be reloaded. Each copy is under 1 MB."""
+    folder = state.path.parent / "snapshots"
+    folder.mkdir(exist_ok=True)
+    shutil.copyfile(state.path, folder / f"{state.expert}_step{state.step:05d}.pt")
 
 
 def finish_topic(run, bank, state: TopicState, report_dir: Path) -> None:
@@ -170,8 +181,7 @@ def train_mixed(run, experts: list[str]) -> None:
     bank.attach(run.model)
     todo = [expert for expert in experts if not is_finished(run, expert, folder, report_dir)]
     states = {expert: prepare_topic(run, bank, expert, folder) for expert in todo}
-    order = remaining_schedule(mixed_schedule({e: s.updates for e, s in states.items()}, core.SEED),
-                               {e: s.step for e, s in states.items()})
+    order = resume_schedule({e: s.updates for e, s in states.items()}, {e: s.step for e, s in states.items()}, core.SEED)
     core.say(run.card, mixed_updates=len(order), topics=len(states), first_20=order[:20])
     pool, pending, skipped_in_row, started = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vllm-writer"), None, 0, time.time()
     try:

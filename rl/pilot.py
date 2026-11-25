@@ -651,7 +651,7 @@ def pin_process(cpus: list[int]) -> None:
 def start_sampler(name: str, args, eos: set, torch, profile: ModelProfile):
     """vLLM inherits its card and CPUs when it starts; this process then moves to the learner CPUs."""
     separate = args.vllm_swap == "separate"
-    engine_card = "main" if separate else name
+    engine_card = args.engine_card if separate else name
     cpus = sorted(PIPELINES[name]["build"] + PIPELINES[name]["gpu"]) if separate else learner_cpus(name)
 
     def on_engine_cpus(make):
@@ -780,6 +780,10 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--vllm-swap", choices=SWAP_MODES, default="sleep",
                         help="How vLLM leaves the card on turn-taking models. Use restart if sleep fails on this driver.")
     parser.add_argument("--cards", default="main,second")
+    # Measured 2026-11-25 on 4B: the second card has no desktop, so vLLM gets a 25,088-token cache (main: 9,408)
+    # and writes 32 answers in 11.4 s instead of 17.6 s. The learner fits on main at 13.4 GB with the desktop.
+    parser.add_argument("--engine-card", choices=list(PIPELINES), default="second",
+                        help="With --vllm-swap separate: the card vLLM writes on. --cards names the learner's card.")
     parser.add_argument("--experts", default=",".join(BEHAVIORS))
     parser.add_argument("--dtype", choices=["float16", "float32"], default="float16")
     parser.add_argument("--compile", action="store_true")
@@ -809,9 +813,10 @@ def make_parser() -> argparse.ArgumentParser:
 
 
 def check_separate_cards(args) -> None:
-    """In separate mode one learner on the second card drives the vLLM engine on the main card."""
-    if args.vllm_swap == "separate" and (args.sampler != "vllm" or args.cards != "second"):
-        raise ValueError("--vllm-swap separate needs --sampler vllm and --cards second")
+    """In separate mode one learner drives the vLLM engine on the other card."""
+    engine = getattr(args, "engine_card", "second")
+    if args.vllm_swap == "separate" and (args.sampler != "vllm" or args.cards not in PIPELINES or args.cards == engine):
+        raise ValueError("--vllm-swap separate needs --sampler vllm and one learner card (--cards) other than --engine-card")
     if getattr(args, "interleave", False) and (not args.overlap or args.judge != "haiku"):
         raise ValueError("--interleave needs --overlap and --judge haiku")
     if getattr(args, "overlap", False) and args.vllm_swap != "separate":

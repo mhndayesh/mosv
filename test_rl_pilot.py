@@ -344,6 +344,27 @@ class TestFittingRows(unittest.TestCase):
 
 class TestSeparateCards(unittest.TestCase):
     def test_engine_starts_on_main_card_and_learner_keeps_second(self):
+        seen, pins = self.start("second", "main")
+        self.assertEqual(seen, {"card": "main", "swap": "separate", "engine_card": "1"})
+        self.assertEqual(pins[0], pilot.ENGINE_CPUS["main"])
+        self.assertEqual(pins[1], sorted(pilot.PIPELINES["second"]["build"] + pilot.PIPELINES["second"]["gpu"]))
+        self.assertFalse(set(pins[0]) & set(pins[1]))
+
+    def test_swapped_cards_put_the_engine_on_the_second_card(self):
+        seen, pins = self.start("main", "second")
+        self.assertEqual(seen, {"card": "second", "swap": "separate", "engine_card": "0"})
+        self.assertEqual(pins[0], pilot.ENGINE_CPUS["second"])
+        self.assertEqual(pins[1], sorted(pilot.PIPELINES["main"]["build"] + pilot.PIPELINES["main"]["gpu"]))
+
+    def test_learner_and_engine_must_use_different_cards(self):
+        args = SimpleNamespace(vllm_swap="separate", sampler="vllm", cards="second", engine_card="second",
+                               interleave=False, overlap=False, judge="checklist", group=4)
+        with self.assertRaises(ValueError):
+            pilot.check_separate_cards(args)
+        pilot.check_separate_cards(SimpleNamespace(**{**vars(args), "cards": "main"}))
+
+    @staticmethod
+    def start(learner_card, engine_card):
         seen, pins = {}, []
 
         def fake_start(*_args, around_build, card, swap, **_kwargs):
@@ -353,26 +374,24 @@ class TestSeparateCards(unittest.TestCase):
 
         cuda = SimpleNamespace(get_device_properties=lambda _i: SimpleNamespace(total_memory=16e9))
         fake_torch = SimpleNamespace(cuda=cuda, set_num_threads=lambda _n: None)
-        args = SimpleNamespace(group=4, max_new=256, kv_cache_dtype="auto", vllm_swap="separate")
-        with mock.patch.dict(os.environ, {"HIP_VISIBLE_DEVICES": "0", "CUDA_VISIBLE_DEVICES": "0"}), \
+        args = SimpleNamespace(group=4, max_new=256, kv_cache_dtype="auto", vllm_swap="separate", engine_card=engine_card)
+        with mock.patch.dict(os.environ, {"HIP_VISIBLE_DEVICES": "9", "CUDA_VISIBLE_DEVICES": "9"}), \
                 mock.patch.object(pilot, "pin_process", pins.append), \
                 mock.patch.object(pilot.VllmSampler, "start", fake_start):
-            self.assertEqual(pilot.start_sampler("second", args, {EOS}, fake_torch, PROFILES["qwen4b"]), "engine")
-            self.assertEqual(os.environ["HIP_VISIBLE_DEVICES"], "0")
-        self.assertEqual(seen, {"card": "main", "swap": "separate", "engine_card": "1"})
-        self.assertEqual(pins[0], pilot.ENGINE_CPUS["main"])
-        self.assertEqual(pins[1], sorted(pilot.PIPELINES["second"]["build"] + pilot.PIPELINES["second"]["gpu"]))
-        self.assertFalse(set(pins[0]) & set(pins[1]))
+            assert pilot.start_sampler(learner_card, args, {EOS}, fake_torch, PROFILES["qwen4b"]) == "engine"
+            assert os.environ["HIP_VISIBLE_DEVICES"] == "9"
+        return seen, pins
 
     def test_separate_mode_never_enables_sleep(self):
         settings = engine_settings(PROFILES["qwen4b"], "main", int(16e9), "separate")
         self.assertNotIn("enable_sleep_mode", settings)
 
-    def test_separate_mode_needs_vllm_on_the_second_card(self):
-        good = SimpleNamespace(vllm_swap="separate", sampler="vllm", cards="second")
+    def test_separate_mode_needs_vllm_and_one_learner_card(self):
+        good = SimpleNamespace(vllm_swap="separate", sampler="vllm", cards="main")  # Engine defaults to the second card.
         pilot.check_separate_cards(good)
-        for bad in (SimpleNamespace(vllm_swap="separate", sampler="hf", cards="second"),
-                    SimpleNamespace(vllm_swap="separate", sampler="vllm", cards="main,second")):
+        for bad in (SimpleNamespace(vllm_swap="separate", sampler="hf", cards="main"),
+                    SimpleNamespace(vllm_swap="separate", sampler="vllm", cards="main,second"),
+                    SimpleNamespace(vllm_swap="separate", sampler="vllm", cards="second")):
             with self.assertRaises(ValueError):
                 pilot.check_separate_cards(bad)
 
