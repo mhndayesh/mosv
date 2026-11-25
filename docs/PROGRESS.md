@@ -1,27 +1,83 @@
 # Progress log
 
-Goal: replace LoRA with tiny steering vectors inside a frozen model, trained by RL, with one router choosing
-at most one expert per request. Research only. The checklists judge process and structure, not truth.
+Goal: replace LoRA with tiny steering vectors inside a frozen model, trained by RL, with one router choosing at
+most one vector per request. Research only. Failed ideas, old runs and their verdicts are in
+[`../archive/FAILED_IDEAS.md`](../archive/FAILED_IDEAS.md).
 
-## Current stage: 8 topics on a 3-8B model (full auto, started 2026-11-23)
+## Current state (2026-11-25)
 
-| Phase | Status |
+| Part | Status |
 |---|---|
-| 1. Scout data and choose the model | Done: Qwen3-4B-Instruct-2507 |
-| 2. Download and clean data, 8 topics | Done: see counts below |
-| 3. Checklists for the 5 new topics | Done: gold examples score 1.0, story "talks about a story" exploit closed |
-| 4. Port the pipeline to the new model | Done: PyTorch path runs on 4B |
-| 5. Retrain the router (8 topics + none) | Done: 2,781 test prompts, 2,178 of 2,184 steers correct, 0 wrong expert, 6 false steers, 3 misses |
-| 6. Small GPU test | Done: split-card run, 4 updates, 13.07 GB peak, 0 GPU faults, about 10-12 s per update |
-| 7. Train all 8 vectors | Done on 2026-11-24: all 8 trained and tested |
-| 8. Final test, side-by-side PDF, report | Done: `data_review/reports/qwen4b_final_review.pdf` (94 pages, 86 side-by-side answers) |
-| 9. Large mixed story dataset | Built: 29,364 real prompts in `data_review/clean_v3/story` (23,383 train, 3,017 dev, 2,964 test). Run `qwen4b_story_v3` is next |
+| Base model | Qwen3-4B-Instruct-2507, frozen, float16 |
+| Topics | engineering, story, teaching, debugging, math solving, explanation, professional email, how-to guide |
+| Router | 8 topics + "none". 6,823 of 6,835 held-out topic prompts got the right vector, 0 a wrong one, 12 none; 6 of 600 normal prompts steered by mistake |
+| Judge | Claude Haiku 5.5, one 5-criterion rubric per topic (`rl/judge_rubrics.py`) |
+| Current vectors | Run `qwen4b_haiku_v3`, all 8 topics trained together (`--interleave`), stopped at about half the planned updates. Picked steps in `checkpoints/rl_pilot/qwen4b_haiku_v3_test` |
+| Review | Full-length blind test on 86 prompts, PDF `data_review/reports/qwen4b_full_answers.pdf` |
 
-Story v3 sources: WritingPrompts 8,809, WildChat 8,809, LMSYS 6,728, ShareGPT 2,215, no_robots 1,476, Arena 922, small human sets 405. Build with `python -m behaviors.prepare_story_mix`. All sexual-themed prompts are removed by keyword from every source, and WildChat's minor-safety moderation flags are applied. Implied content with no matching word can remain. Storium and `E:\Story-Writing` are excluded; the latter uses 4 templates for 93% of rows. About 10% of a 60-row non-WritingPrompts sample was not a clear creative request.
+## Result 1: training scores (Haiku, 256-token answers)
 
-Topics: engineering, story, teaching, debugging, math solving, explanation, professional email, how-to guide.
+Dev = Haiku's preference for the steered answer against normal Qwen on 128 held-out dev prompts (0.50 = tie).
+The picked step is the best of each topic's last 3 dev checks. Only 3 topics ran their final test before the stop.
 
-Real prompts per topic (train / dev / test):
+| Topic | Trained to step | Picked step | Dev | Final test: normal / random / steered | Steered beats normal |
+|---|---|---|---|---|---|
+| Debugging | 1,069 | 1,069 | 0.871 | 0.257 / 0.248 / **0.889** | 100% |
+| Professional email | 240 | 150 | 0.825 | not run | |
+| Story | 1,004 | 900 | 0.821 | not run | |
+| Math solving | 561 | 550 | 0.735 | not run | |
+| Teaching | 91 | 91 | 0.732 | 0.466 / 0.426 / **0.730** | 78.4% |
+| Explanation | 540 | 400 | 0.727 | not run | |
+| Engineering | 342 | 300 | 0.714 | 0.347 / 0.335 / **0.747** | 89.3% |
+| How-to guide | 558 | 450 | **0.483** | not run | below normal |
+
+## Result 2: full-length blind test (the main result)
+
+86 held-out prompts (10 per topic, 6 outside all topics), each answered in full twice: normal and with the
+router's vector. vLLM on one card, greedy, no length cap; 4 of 172 answers were stopped for looping. Haiku saw
+each pair as "Answer 1" and "Answer 2", judged it twice with the order swapped, and scored every rubric criterion
+separately as strict JSON: 172 calls, 0 failed, $0.09.
+
+| Topic | Normal | Steered | Steered wins / ties / losses |
+|---|---|---|---|
+| Debugging | 1.70 | **4.12** | 10 / 0 / 0 |
+| Story | 2.55 | **3.82** | 10 / 0 / 0 |
+| Professional email | 3.22 | **4.01** | 9 / 1 / 0 |
+| Teaching | 2.72 | **3.43** | 9 / 0 / 1 |
+| Explanation | 2.90 | **3.45** | 7 / 1 / 2 |
+| Math solving | 4.53 | 4.47 | 2 / 7 / 1 |
+| How-to guide | 3.00 | 2.86 | 3 / 1 / 6 |
+| Engineering | 2.48 | 2.18 | 2 / 0 / 8 |
+| **All 80** | **2.89** | **3.54** | |
+
+The 6 prompts outside the topics got a general rubric. The router left them unsteered, so both answers are the
+same text and scored the same.
+
+What this shows, and what it does not:
+
+- 5 topics clearly improve. Math is a tie, because normal Qwen is already strong there.
+- **Engineering does not carry over to full length.** It beat normal at 256 tokens (test 0.747) but loses on
+  full programs (2.18 against 2.48). Its steered answers were also the longest: 64,499 tokens for 10 answers,
+  2 stopped for looping.
+- **How-to is slightly worse with its vector**, as its dev score (0.483) predicted. The owner's view: how-to is
+  closer to opinion than to a structured skill, unlike debugging.
+- 10 prompts per topic is a small sample. Knowledge retention (factual accuracy) is still untested.
+- The full test used an **fp8 KV cache**. Training and dev scoring used the default cache, because fp8 drifted from
+  PyTorch in training tests. The two setups are not identical.
+
+## Open items
+
+- How-to: retrain or drop. Engineering: train on longer answers, or split the topic.
+- Professional email, story, math and explanation never ran their final test.
+- The unused vLLM turn-taking code (`CardTurns`, `WeightShuttle`) is still in `rl/vllm_sampler.py`.
+- Debugging excludes prompts too long to leave room for an answer: 840 train, 105 dev, 114 test.
+- Two `HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION` faults on 2026-11-24, cause unknown.
+- About 1 in 4 long greedy answers changes between two identical vLLM runs, so dev scores from 0.45 to 0.55 can be chance.
+
+## Data
+
+Real prompts only, capped at 12,000 per topic. Training splits: `data_review/rl_v4` (68,944 train, 8,741 dev,
+8,596 test), built by `python -m rl.prepare_v4`. Sexual-themed prompts are removed by keyword.
 
 | Topic | Train | Dev | Test |
 |---|---|---|---|
@@ -34,157 +90,56 @@ Real prompts per topic (train / dev / test):
 | professional_email | 4,000 | 488 | 512 |
 | how_to_guide | 9,572 | 1,207 | 1,221 |
 
-Teaching stays small because no suitable new source was found. About 920 of the 2,181 arena engineering prompts share one template.
+Story training uses the mixed set in `data_review/clean_v3/story` (29,364 real prompts: WritingPrompts 8,809,
+WildChat 8,809, LMSYS 6,728, ShareGPT 2,215, no_robots 1,476, Arena 922, small human sets 405; built by
+`python -m behaviors.prepare_story_mix`). Teaching stays small because no suitable new source was found. About
+920 of the 2,181 arena engineering prompts share one template.
 
-## Haiku-judged run: `qwen4b_haiku_v1` (started 2026-11-24)
+## Judge details (`rl/api_judge.py`)
 
-The regex story checklist did not predict human votes (49.6% on 26,298 LitBench pairs), and the old story vector collapsed into one "The rain fell" template. Training now uses Claude Haiku 5.5 as the judge.
+- Training: one call per prompt in one order and its exact reverse, thinking off, strict JSON schema. A failed call
+  is retried once, then skipped; a skipped call never counts as a low score. 16 parallel calls (32 hit rate limits).
+- Review: `reports/score_full.py` scores each criterion separately for both answers, blind, in both orders.
+- Rubric check: on 20 prompts, normal answers beat shuffled ones 97.5% of the time and wrong-prompt answers 100%.
+- Logs: `data_review/rl_v4/<run>/judge_calls.jsonl`, with no API key or answer text. Budget: $50 hard stop per run.
 
-- **Data:** `python -m rl.prepare_v4` builds `data_review/rl_v4`: 68,944 train, 8,741 dev, 8,596 test prompts across 8 topics. Sexual-themed prompts are removed by keyword.
-- **Judge:** `rl/api_judge.py`. One call per prompt, in one order and its exact reverse, with thinking off and a strict JSON schema. A failed call is retried once, then skipped. Skipped calls never count as low scores.
-- **Limits:** 16 parallel calls, because 32 caused burst rate-limit errors. Account limits seen: 4,000 requests, 2M input tokens, and 400K output tokens per minute.
-- **Selection:** the best vector is the one Haiku prefers most against normal Qwen on dev prompts. If none beats normal, the zero vector is kept.
-- **Logs:** `data_review/rl_v4/<run>/judge_calls.jsonl`. They hold no API key or answer text.
-- **Budget:** $50 hard stop, counted across restarts.
-- **Overlap:** `--overlap` writes the next batch while Haiku and the learner finish the current one. Each gradient is computed at the vector that wrote its batch. Early full-run pace is about 11.5 s per update. It was not compared head to head with the old loop, because the owner stopped that test to save time.
-- **Per-topic rubrics:** `rl/judge_rubrics.py`. Each topic has 5 criteria from published guidelines, and Haiku sees only the rubric for the topic it judges. On 20 prompts, normal answers beat shuffled ones 97.5% of the time and wrong-prompt answers 100%.
-- **Mixed training:** `--interleave` shuffles small 8-prompt updates across all 8 topics in one run, about 5.7 s per update. Each topic keeps its own vector, optimizer, best vector and checkpoint. A 24-update GPU test confirmed exact per-topic counts and no carry-over between topics.
-- **Brake:** with Haiku judging, rollbacks only catch empty, looping or near-random output, so code, poems and refusals are left to the judge.
-- **Noise:** about 1 in 4 long greedy answers changes between two identical vLLM runs, so a dev score from 0.45 to 0.55 can be chance.
-- **VRAM:** vLLM's KV cache is fixed at 1.30 GiB on the main card because its memory budget could otherwise grow to 11.23 GiB, or about 14.5 GiB with Windows apps. The monitor logs anything above 14 GB and stops only above 15.2 GB or 3 GB shared for 3 checks in a row.
+## Hardware rules (measured)
 
-## Rules for this stage
-
-- One model, VRAM and KV cache per card. Only token IDs and steering vectors cross between cards.
-- float16, compiled, default vLLM KV cache. fp8 drifted from PyTorch in testing.
-- Stop any run above 14 GB on a card or 2.5 GB shared.
-- Small GPU test before every long run. Commit each verified phase locally. Do not push.
-
-## Latest result: Qwen3-4B-Instruct, run `qwen4b_v2`
-
-Test scores on held-out prompts. The checklist measures structure, not truth or quality.
-
-| Topic | Test prompts | Unsteered | Random | Trained | Broken |
-|---|---|---|---|---|---|
-| Story | 300 | 0.070 | 0.075 | 0.778 | 3.3% |
-| Teaching | 81 | 0.152 | 0.169 | 0.679 | 0% |
-| Math solving | 300 | 0.171 | 0.169 | 0.488 | 0% |
-| Debugging | 300 | 0.169 | 0.171 | 0.404 | 0.3% |
-| Engineering | 300 | 0.011 | 0.009 | 0.391 | 0% |
-| Explanation | 300 | 0.040 | 0.045 | 0.374 | 1.7% |
-| Professional email | 300 | 0.404 | 0.392 | 1.000 (likely format only) | 0% |
-| How-to guide | 300 | 0.183 | 0.172 | 0.718 | 0% |
-
-Router on all held-out prompts, after the padding fix: 6,823 of 6,835 topic prompts got the right vector, 0 got a wrong vector, 12 got no steering. On 600 normal prompts, 6 were steered by mistake.
-
-Open items:
-
-- The run stopped at 18:01 with `HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION`, the second such fault today. Windows logged no GPU error and both cards report OK. The cause is unknown.
-- The email dev score of 0.992 is not trustworthy. In the PDF (page 40) the steered email changed a policy update into a meeting request and still scored 1.00, so the checklist likely rewards format.
-- Debugging excludes prompts too long to leave room for a full answer: 840 train, 105 dev, 114 test.
-- The owner read the PDF, but gaming has not been measured across the full test set.
-- Fixed: after the first generation, padding stayed on in the shared tokenizer and put pad tokens into the router's input. This caused the debugging-to-math errors in the first PDF. Older 0.6B router numbers from `evaluate.py` may be affected.
-- Tested and removed: running dev scoring in the same vLLM queue as training answers saved no measurable time (about 24 s against 22-27 s).
-- Story data samples: found responses have normal writing structure but score only 0.00-0.35 on the story checklist, so use the prompts only.
-- Knowledge retention is untested: no factual-accuracy check has compared steered and normal answers.
-- The unused vLLM turn-taking code (`CardTurns`, `WeightShuttle`) is still in `rl/vllm_sampler.py`.
-
-Resume or retest a topic in WSL. A finished topic skips training and runs its final test:
-
-```bash
-cd /mnt/c/projects/llm_steering_rl
-V=$HOME/vllm-dual-9070xt/.venv
-LD_LIBRARY_PATH=$V/lib/python3.12/site-packages/_rocm_sdk_core/lib ROCPROFILER_REGISTER_ENABLED=0 \
-VLLM_WSL2_ENABLE_PIN_MEMORY=1 VLLM_NO_USAGE_STATS=1 VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
-HF_HUB_OFFLINE=1 STEERING_PROFILE=qwen4b STEERING_TOPICS=v2 \
-$V/bin/python -m rl.pilot --profile qwen4b --run qwen4b_v2 --cards second \
-  --experts how_to_guide --sampler vllm --vllm-swap separate --compile \
-  --updates 86 --prompts 16 --group 4 --max-new 256 --dev 128 --test 300 --eval-every 5
-```
-
-## First side-by-side review: Qwen3-4B (2026-11-24)
-
-This section describes the first 46-prompt PDF, made before the router fix. The current review is `data_review/reports/qwen4b_final_review.pdf`.
-
-PDF: `data_review/reports/qwen4b_steered_vs_normal.pdf` (gitignored). It shows 46 random held-out prompts, normal answer left and steered answer right: 6 for each of the 7 trained topics, plus 4 normal prompts. How-to is excluded because it has no vector. Prompts over 512 tokens were skipped, answers stop at 256 tokens, and emojis were removed because the PDF font cannot draw them.
-
-The run used the second card only: 179 s, 8.65 GB peak PyTorch memory, 0 GPU errors. Answers are saved in `data_review/reports/compare_4b.json` (gitignored). `reports/compare_4b.py` writes them on one GPU in WSL, and `reports/build_pdf_4b.py <out.pdf>` builds the PDF (needs reportlab).
-
-| Topic (6 prompts) | Normal | Steered |
-|---|---|---|
-| Professional email | 0.35 | 1.00 |
-| Teaching | 0.15 | 0.67 |
-| Story | 0.08 | 0.64 |
-| Math solving | 0.17 | 0.52 |
-| Engineering | 0.00 | 0.39 |
-| Debugging | 0.17 | 0.39 |
-| Explanation | 0.00 | 0.36 |
-
-These are checklist scores on a small sample. They measure structure, not truth or quality.
-
-Router on these 46 prompts: 44 correct, 1 wrong expert (page 21, debugging sent to math), 1 miss (page 11, story left unsteered).
-
-Pages to reread: 40 (email changed its purpose), 22 (debugging answer names an `updateFilter()` cause that is not in the bug report), 21 and 11 (router errors).
-
-### Owner's observation (not a scientific claim)
-
-After reading the PDF, the owner observed that on Qwen3-4B the steering vectors visibly change how the frozen model behaves, executes and structures its answers, regardless of output quality. It works like behavior fine-tuning and does not appear to add information. The owner's reasoning is that a large model already holds broad knowledge but is biased by its training toward certain tasks, so vectors could re-steer it per task or prompt while its weights stay fixed.
-
-This is a logical observation from using the method. It has not been tested formally and is not a scientific fact. Retained knowledge, very large models and undoing a trained bias are all untested.
-
-### Owner's hypothesis: minimize system prompts (untested)
-
-A vector trained per workflow, or per task inside a workflow, can carry that workflow's behavior instructions, so its system prompt can shrink while keeping the same adherence. The goal is to **minimize, not replace**. Example: a novel-writing platform with separate creative workflows and technical workflows (ingestion, uploads, API calls, MCP servers), each with its own vector.
-
-| Part of the system prompt | Plan |
+| Rule | Why |
 |---|---|
-| Tone, style, voice, format, step order | Candidate for a vector |
-| Habits such as "ask before assuming" | Possible, needs testing |
-| Facts, platform details, character sheets, story state | Stays in the prompt |
-| API schemas, MCP tool definitions, exact JSON | Stays in the prompt |
-| Hard rules, safety, permissions | Stays in the prompt and is enforced in code |
-
-A workflow already knows which task it is running, so it can load its vector directly without the router.
-
-Risks: stronger steering can break text, prompt caching already makes repeated prompts cheap, the method needs a self-hosted model, and each new model version needs new vectors.
-
-Planned test, on the same prompts:
-
-1. Full system prompt (baseline)
-2. Short prompt only
-3. Short prompt + trained vector
-4. Short prompt + random vector
-
-The hypothesis holds if #3 gets close to #1 and clearly beats #2 and #4, with no rise in broken or off-task answers. The main measure is how many prompt tokens can be removed before adherence falls below the full prompt's.
-
-## Earlier result: Qwen3-0.6B, run `vllm_full`
-
-| Behavior | Test prompts | Unsteered | Random | Trained | Broken |
-|---|---|---|---|---|---|
-| Story | 200 | 0.111 | 0.063 | 0.828 | 0% |
-| Teaching | 81 | 0.200 | 0.134 | 0.698 | 0% |
-| Engineering | 199 | 0.005 | 0.010 | 0.170 | 21.6% |
-
-Router on 680 held-out prompts: 463 steered, 460 correct, 3 wrong, 19 missed.
-
-Known limits:
-
-- Engineering stalled after 8 rollbacks. Its `vllm_full` file holds update 86, not its best update 40.
-- Some story answers describe a story instead of telling one, and still score well.
-- Training step size still uses the average activation, which the huge first token inflates.
+| Never tensor parallel across the two cards | It ran at about half the speed of one card (72 card-to-card syncs per token in WSL), and the display card spilled 3-8 GB into system RAM in 4 of 7 tries |
+| Prefer the second card (no display) | Windows gives WSL only about 10-13 GB of the display card, and the amount changed between runs |
+| Training: vLLM on one card writes, PyTorch on the other learns | Two 8 GB copies cannot share a card, and vLLM sleep fails on ROCm in WSL. About 10-12 s per update, 0 faults |
+| Testing: one card, CUDA graphs on, fp8 KV | 80k context with a 5.7 GiB cache; 86 answers (99,186 tokens) in 153 s, up to 85 at once, 0 preemptions |
+| Watch shared GPU memory during runs | Spills into system RAM are silent and slow; check `\GPU Adapter Memory(*)\Shared Usage` |
 
 ## Decisions
 
 | Date | Decision | Why |
 |---|---|---|
-| 2026-11-24 | 4B main-card vLLM budget 10.5 GB | 11.0 reached 14.03 GB and hit the safety stop; 10.0 slowed writing from about 8 s to 14 s; 10.5 ran at about 8.5 s with a 13.15 GB peak |
-| 2026-11-23 | Default vLLM KV cache, not fp8 | fp8 matched PyTorch on 20-32% of steered words; default matched 89-95% |
+| 2026-11-25 | No tensor parallel; test on one card | See the hardware rules; owner rule |
+| 2026-11-25 | Full-length answers with a loop check for the review | 256-token answers cut most answers mid-sentence; the loop check stops answers whose recent tokens are mostly one repeated block |
+| 2026-11-25 | Blind per-criterion Haiku scoring for the review | Checklist scores rewarded format, not quality |
+| 2026-11-24 | Haiku judge with per-topic rubrics for training | The story checklist agreed with human votes on 49.6% of 26,298 LitBench pairs |
+| 2026-11-24 | 4B main-card vLLM budget 10.5 GB in training | 11.0 reached 14.03 GB; 10.0 slowed writing from about 8 s to 14 s |
+| 2026-11-23 | Default vLLM KV cache in training, not fp8 | fp8 matched PyTorch on 20-32% of steered words; default matched 89-95% |
 | 2026-11-23 | Clear the vLLM prefix cache on every vector change | Cached prompt work otherwise uses the old vector |
 | 2026-11-23 | Cap vectors at 50% of the median token size | Qwen's first token is about 8,200 and inflated the average |
-| 2026-11-23 | vLLM on P-cores, PyTorch on E-cores, per card | vLLM used about 2x PyTorch's CPU |
-| 2026-11-23 | Base model: Qwen3-4B-Instruct-2507 | Same Qwen3 class, Apache-2.0, text only. 8B is 16.4 GB in float16 and cannot fit |
-| 2026-11-23 | 4B: vLLM on the main card writes and scores, PyTorch on the second card learns | Two 8 GB copies cannot share a card, vLLM sleep fails on this ROCm/WSL setup, and PyTorch-only generation took 54-112 s per update and hit a GPU memory fault. The split takes about 10-12 s per update with 0 faults |
+| 2026-11-23 | Base model Qwen3-4B-Instruct-2507 | Same Qwen3 class, Apache-2.0, text only; 8B is 16.4 GB in float16 and cannot fit one card |
 | 2026-11-23 | Any GPU fault stops all GPU work until the owner is back | Retrying a real driver fault unattended could freeze the PC |
-| 2026-11-23 | Drop prompts that leave no room for a 256-token answer | Up to 3,708-token debugging prompts exceed the 1,024-token limit; a run stalled when it reached them |
-| 2026-11-23 | Replace argument with explanation | No real argument-prompt dataset over 3,000 rows was found |
-| 2026-11-23 | Real prompts only, capped at 12,000 per topic | No template padding; engineering and teaching may stay well below 10,000 |
+| 2026-11-23 | Drop prompts that leave no room for an answer | Debugging prompts up to 3,708 tokens stalled a run |
+| 2026-11-23 | Explanation instead of argument | No real argument-prompt dataset over 3,000 rows was found |
+
+## Owner's observations and hypotheses (untested)
+
+**Behavior, not knowledge.** On Qwen3-4B the vectors visibly change how the frozen model structures and carries out
+its answers. They seem to work like behavior fine-tuning and do not appear to add information. The owner's
+reasoning: a large model already holds broad knowledge but is biased toward certain tasks, so vectors could
+re-steer it per task while its weights stay fixed. Retained knowledge, very large models and undoing a trained bias
+are all untested.
+
+**Shorter system prompts.** A vector per workflow (or per task inside a workflow) could carry tone, style, format
+and step order, so the system prompt can shrink. Facts, schemas, tool definitions and hard rules stay in the prompt.
+A workflow knows its task, so it can load its vector without the router. Planned test on the same prompts: full
+prompt, short prompt, short prompt + trained vector, short prompt + random vector. The hypothesis holds if the third
+gets close to the first and clearly beats the second and fourth, with no rise in broken answers.

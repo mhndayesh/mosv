@@ -1,6 +1,7 @@
 # Research-only datasets, reports and trained outputs
 data_review/
 checkpoints/
+archive/
 *.pt
 *.npz
 *.safetensors
