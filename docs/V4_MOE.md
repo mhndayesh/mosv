@@ -69,6 +69,34 @@ v4 keeps v3's quality; the differences are within Haiku's run-to-run noise.
 
 **LM Studio:** its active engine (llama.cpp ROCm runtime 2.80.1) includes `hy_v3`. Running that engine's own
 `llama-server.exe` on the v4 GGUF gives steered answers whose openings match stock llama.cpp v4 (92-221 chars).
-Not yet loaded through the LM Studio app itself: `lms import <gguf>` then load it in the app.
+Installed 2026-11-25 as a hardlink (no second 8 GB copy) at
+`C:\Users\mhnda\.lmstudio\models\local\Qwen3-4B-steer-v4-MoE\Qwen3-4B-steer-v4-MoE-F16.gguf`; `lms ls` lists it as
+`qwen3-4b-steer-v4-moe`, arch `hy_v3`, 4.0B, 8.10 GB. Needs an LM Studio runtime that includes `hy_v3`.
+
+## How it maps onto MoE, and what is custom
+
+| MoE part in llama.cpp | Tensor | What v4 puts there |
+|---|---|---|
+| Router | `blk.N.ffn_gate_inp` | Linear 2560 -> 9, the topic gate |
+| Experts | `blk.N.ffn_{gate,up,down}_exps` | Expert 0 = zeros ("none"), experts 1-8 = topic SwiGLU MLPs (hidden 128) |
+| Shared expert | `blk.N.ffn_{gate,up,down}_shexp` | Qwen's original MLP, unchanged |
+| Top-k | `hy_v3` code | top-1, sigmoid, weights normalised (weight 1) |
+
+Only layers 9/18/27 are MoE; the other 33 stay dense Qwen. Unlike a normal MoE (large experts replacing the MLP,
+several active per token, trained from scratch), v4 keeps the full MLP and adds tiny experts beside it (+55 MB).
+No custom code at run time. Custom code only at build time: `moe/train.py` and `moe/export.py`. The file shows as
+arch `hy_v3`, not `qwen3`; the Qwen chat template is copied over. llama.cpp builds without `hy_v3` cannot load it.
+
+## Routing is per token (kept on purpose)
+
+v3 picks one vector per prompt. v4's gates pick an expert for **every token** (prompt and answer) at each of the
+3 MoE layers, independently. The owner prefers this over v3's per-prompt pick (2026-11-25).
+- Held-out agreement with the prompt's topic: 95.0% of tokens at layer 9, 99.3% at 18, 99.4% at 27. Layers 18
+  and 27 see layer 9's steering, so they mostly lock onto the same topic.
+- About 1 token in 20 at layer 9 gets a different expert (which one was not measured). Scores held anyway.
+- A prompt that mixes two topics can get different experts on different tokens. Not tested yet.
+- No per-request override (v3's `"steer"` field): to run unsteered, load the plain Qwen GGUF.
+- If strict one-topic-per-answer is ever wanted: retrain the gates with a consistency loss; llama.cpp has no
+  "lock the expert" setting.
 
 Not done yet: RL fine-tuning of the experts (not needed so far); a Q8_0 version (`llama-quantize`).

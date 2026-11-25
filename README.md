@@ -132,7 +132,9 @@ F16 and `--models-max 1`).
 `Qwen3-4B-steer-v4-MoE-F16.gguf` runs in plain llama.cpp (and LM Studio's engine) with no proxy:
 `llama-server -m Qwen3-4B-steer-v4-MoE-F16.gguf -ngl 999 --jinja`. The steering is built as MoE layers of the
 `hy_v3` architecture llama.cpp already has, and the router lives inside the model as per-token gates. It scores
-the same as v3 (3.61 vs 3.54 on the blind test). How it was built and measured: [docs/V4_MOE.md](docs/V4_MOE.md).
+the same as v3 (3.61 vs 3.54 on the blind test). The gates pick an expert per token, not once per prompt.
+In LM Studio it is installed as `local/Qwen3-4B-steer-v4-MoE` (listed as `qwen3-4b-steer-v4-moe`, arch `hy_v3`).
+How it was built and measured: [docs/V4_MOE.md](docs/V4_MOE.md).
 Rebuild: `moe/make_data.py` -> `moe/train.py` (WSL, one card) -> `moe/export.py` -> `moe/full_test.py`.
 
 ## What reproduces exactly, and what does not

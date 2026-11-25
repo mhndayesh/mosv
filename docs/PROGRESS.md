@@ -82,7 +82,9 @@ Limits: LM Studio cannot load control vectors; the vectors cannot be baked into 
 The v3 router + vectors distilled into real MoE layers of the `hy_v3` architecture at layers 9/18/27 (original
 MLP = shared expert, expert 0 = none, 8 small SwiGLU topic experts, per-token top-1 gate). One 8.10 GB GGUF, no
 proxy, no custom code; also runs on LM Studio's engine. Blind Haiku average on the 80 topic prompts: normal 2.89,
-v3 3.54, **v4 3.61**. 367 tok/s with one copy per card. Details: [V4_MOE.md](V4_MOE.md).
+v3 3.54, **v4 3.61**. 367 tok/s with one copy per card. Routing is per token (95-99% agree with the prompt's
+topic); the owner prefers this to v3's per-prompt pick. Installed in LM Studio as `qwen3-4b-steer-v4-moe`.
+Details: [V4_MOE.md](V4_MOE.md).
 
 ## Open items
 
