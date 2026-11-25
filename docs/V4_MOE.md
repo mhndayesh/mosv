@@ -100,3 +100,20 @@ v3 picks one vector per prompt. v4's gates pick an expert for **every token** (p
   "lock the expert" setting.
 
 Not done yet: RL fine-tuning of the experts (not needed so far); a Q8_0 version (`llama-quantize`).
+
+## Reproduce
+
+Exact commands, versions (HF revision `cdbee75f`, llama.cpp `abca692`, gguf-tools venv) and sha256 of every
+artifact: README "Build v4", steps 9-14. Seeds: data sample 4, token sample 0, training 0 (`--seed`, added after
+the published run, so a retrain matches closely, not bit for bit). Export is exact: re-exporting the published
+`moe.pt` gave the same GGUF sha256 (`35d00cab...`, 2026-11-25). Tests: `test_moe.py`.
+
+## LM Studio notes (2026-11-25)
+
+- Flash Attention works. With Unified KV Cache on, every model in LM Studio's ROCm and Vulkan engines logs
+  `Flash Attention over K/V rows not supported, set to disabled` (`llama-context.cpp` `resolve_fused_ops`). That
+  disables only `fused_kv_rows`, an add-on that makes each slot read only its own part of a shared cache; Vulkan
+  rejects it (`ggml-vulkan.cpp`, `src[5] != nullptr`). On gfx1201 others measured the fallback as faster.
+- A Q4_1 KV cache has no Flash Attention kernel and is converted to F16 each step (slow): use Q8_0 or Q4_0.
+- Unified off gives each slot its own full context: 4 slots x 108,544 at Q4_0 took about 28 GB.
+- The warning `control-looking token: 128247 '</s>'` comes from Qwen's own vocabulary (same in the base GGUF).

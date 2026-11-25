@@ -23,24 +23,32 @@ What this repo changes:
 - **One vector per topic instead of one shared set**, with a **router** that picks a vector, or none, per prompt.
 - **Training:** each vector is trained by group-relative RL, with Claude Haiku judging against a per-topic rubric.
 
-## Current result (2026-11-25, run `qwen4b_haiku_v3`)
+## Current model: v4, one GGUF for stock llama.cpp and LM Studio (2026-11-25)
+
+`Qwen3-4B-steer-v4-MoE-F16.gguf` (8.10 GB) is Qwen3-4B with the trained steering built in as real MoE layers of
+`hy_v3`, an architecture llama.cpp already has. The router is inside the model as per-token gates. No proxy, no
+custom build: `llama-server -m Qwen3-4B-steer-v4-MoE-F16.gguf -ngl 999 --jinja`, or load it in LM Studio. Design,
+measurements and limits: **[docs/V4_MOE.md](docs/V4_MOE.md)**.
 
 Full-length answers on 86 held-out prompts, scored blind by Claude Haiku on each topic's 5-criterion rubric
-(1-5 scale; both answers shown as "Answer 1" and "Answer 2", judged twice with the order swapped).
+(1-5 scale; both answers shown as "Answer 1" and "Answer 2", judged twice with the order swapped). v3 is the
+teacher v4 was distilled from (vectors + router, served with a proxy; archived).
 
-| Topic | Normal | Steered | Steered wins |
-|---|---|---|---|
-| Debugging | 1.70 | **4.12** | 10 / 10 |
-| Story | 2.55 | **3.82** | 10 / 10 |
-| Professional email | 3.22 | **4.01** | 9 / 10 |
-| Teaching | 2.72 | **3.43** | 9 / 10 |
-| Explanation | 2.90 | **3.45** | 7 / 10 |
-| Math solving | 4.53 | 4.47 | 2 / 10 (7 ties) |
-| How-to guide | 3.00 | 2.86 | 3 / 10 |
-| Engineering | 2.48 | 2.18 | 2 / 10 |
-| **All 80 topic prompts** | **2.89** | **3.54** | |
+| Topic | Normal | v3 | **v4** | v4 wins |
+|---|---|---|---|---|
+| Debugging | 1.70 | 4.12 | **4.09** | 10 / 10 |
+| Professional email | 3.22 | 4.01 | **4.03** | 10 / 10 |
+| Story | 2.55 | 3.82 | **3.66** | 10 / 10 |
+| Teaching | 2.72 | 3.43 | **3.55** | 9 / 10 |
+| Explanation | 2.90 | 3.45 | **3.49** | 8 / 10 |
+| How-to guide | 3.00 | 2.86 | **3.21** | 7 / 10 |
+| Engineering | 2.48 | 2.18 | **2.41** | 3 / 10 |
+| Math solving | 4.53 | 4.47 | **4.43** | 2 / 10 |
+| **All 80 topic prompts** | **2.89** | **3.54** | **3.61** | |
 
-PDF with every answer side by side and per-criterion scores: `data_review/reports/qwen4b_full_answers.pdf`.
+v3 vs v4 differences are within Haiku's run-to-run noise. PDF with every v3 answer side by side:
+`data_review/reports/qwen4b_full_answers.pdf`; v4 answers and scores: `data_review/reports/v4_full_test.json`,
+`v4_scores.json`.
 
 ## How it works
 
@@ -49,6 +57,10 @@ the chosen topic `e` added: `h'[l,i] = h[l,i] + s[e,l]`. The router picks `e` on
 pass, or picks "none" and leaves the model untouched. Training samples a group of answers per prompt, Haiku
 scores them against the topic rubric, and a group-relative policy gradient (REINFORCE with group-centered
 rewards; no PPO clipping, no KL term) updates only that topic's vector.
+
+v4 turns that into MoE layers. At layers 9, 18, 27 the original MLP becomes the always-on shared expert; next to
+it sit expert 0 (all zeros = "none") and 8 small SwiGLU topic experts, picked top-1 per token by a linear gate.
+The experts are distilled to output the v3 vectors and the gates to give the router's topic, from v3's own answers.
 
 ## Repository map
 
@@ -69,7 +81,8 @@ rewards; no PPO clipping, no KL term) updates only that topic's vector.
 | `reports/vllm_full_test.py` | Writes full-length normal and steered answers on vLLM |
 | `reports/score_full.py` | Blind Haiku scoring, one score per criterion, strict JSON |
 | `reports/build_pdf_full.py` | The side-by-side PDF with bookmarks (helpers in `build_pdf_4b.py`) |
-| `gguf/export_vectors.py`, `gguf/serve.py` | llama.cpp bundle: vectors as control-vector GGUFs, and the routing proxy |
+| `moe/make_data.py`, `moe/train.py` | v4: v3's answers as training data; distil gates + experts (`checkpoints/moe_v4/moe.pt`) |
+| `moe/export.py`, `moe/full_test.py` | v4: write the `hy_v3` GGUF; full-length test in llama-server |
 | `evaluate.py`, `infer.py`, `model_trace.py` | Older checklist evaluation, one-off routed answers, per-token trace |
 | `test_*.py` | Tests (`python -m pytest`); `test_reports.py` covers the review scripts with no GPU |
 | `checkpoints/rl_pilot/qwen4b_haiku_v3*` | Current vectors (`_test` = the step picked per topic). Gitignored |
@@ -105,37 +118,55 @@ export LD_LIBRARY_PATH=$V/lib/python3.12/site-packages/_rocm_sdk_core/lib ROCPRO
 
 Package versions: `requirements.txt`. Light tests for steps 4-8, no GPU: `python -m pytest test_reports.py`.
 
-## Run it in llama.cpp (GGUF + control vectors + router proxy)
+## Build v4 (after steps 1-6 above; step 13 reuses step 6's normal answers)
 
-Stock llama.cpp, no custom build. The model stays a normal GGUF; each topic vector is a 31 KB llama.cpp
-**control vector** (`direction.9/18/27`, added after those layers exactly like training), the same way vision
-models ship a separate `mmproj` file. LM Studio has no control-vector support, so it can only run the plain model.
+Model folder `C:\llm\models\qwen3-4b-steer\`. Converter venv `C:\Users\mhnda\.venvs\gguf-tools` (torch 2.11.0+cpu,
+transformers 4.57.6, numpy 2.2.6, gguf-py installed editable from `C:\llm\tools\llama.cpp` at commit `abca692`).
 
-Bundle folder `C:\llm\models\qwen3-4b-steer\`: `Qwen3-4B-Instruct-2507-F16.gguf`, `vectors\steer-<topic>.gguf`,
-`hf\` (config, tokenizer and weights the router reads).
+9. **Base GGUF** (Windows, gguf-tools venv): `hf\` holds hard links to the HF snapshot
+   `Qwen/Qwen3-4B-Instruct-2507@cdbee75f17c01a7cc42f958dc650907174af0554` (the WSL symlinks are unreadable from Windows):
+   `python C:\llm\tools\llama.cpp\convert_hf_to_gguf.py C:\llm\models\qwen3-4b-steer\hf --outtype f16 --outfile C:\llm\models\qwen3-4b-steer\Qwen3-4B-Instruct-2507-F16.gguf`
+10. **Training data** (WSL env above, one card): `HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 $V/bin/python moe/make_data.py`
+    (seed 4; 2,400 prompts from `data_review/router_v2`, each answered greedily with its v3 vector).
+11. **Distil gates + experts** (WSL, one card): `HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 $V/bin/python moe/train.py`
+    (seed 0; writes `checkpoints/moe_v4/moe.pt` with its settings and per-layer accuracy).
+12. **GGUF** (Windows, gguf-tools venv, about 2 min):
+    `python moe/export.py C:\llm\models\qwen3-4b-steer\Qwen3-4B-Instruct-2507-F16.gguf C:\llm\models\qwen3-4b-steer\Qwen3-4B-steer-v4-MoE-F16.gguf --moe checkpoints/moe_v4/moe.pt`
+    (without `--moe` it writes all-zero experts: output identical to plain Qwen, a check of the host architecture).
+13. **Full-length test** (Windows, plain Python, both cards, one full copy each): `python moe/full_test.py C:\llm\models\qwen3-4b-steer\Qwen3-4B-steer-v4-MoE-F16.gguf`
+    (`--llama` picks the llama-server.exe; default `C:\llm\tq-vulkan\build\bin\llama-server.exe`).
+14. **Score:** `$V/bin/python reports/score_full.py --answers data_review/reports/v4_full_test.json --out data_review/reports/v4_scores.json`
 
-1. **Base GGUF:** llama.cpp's `convert_hf_to_gguf.py <hf folder> --outtype f16` (venv `~\.venvs\gguf-tools`).
-2. **Vectors:** `python gguf/export_vectors.py` (any Python with torch + gguf-py).
-3. **One topic by hand:** `llama-server -m Qwen3-4B-Instruct-2507-F16.gguf --control-vector vectors\steer-debugging.gguf -dev Vulkan1 -ngl 999 --jinja`
-4. **Automatic routing:** `C:\Users\mhnda\.venvs\ai-training-rocm-windows\Scripts\python.exe gguf/serve.py`, then use
-   `http://127.0.0.1:8091/v1` from any OpenAI client. It starts llama-server in router mode (one preset per
-   topic, same GGUF), routes each request with the trained router (GPU, 23 ms) and forwards it. The pick comes
-   back in `X-Steer-Route` / `X-Steer-Confidence`; send `"steer": "<topic>"` or `"none"` to override.
+Light tests, no GPU: `python -m pytest test_moe.py` (gguf-tools venv for the export test).
 
-Checked 2026-11-25: the router in `serve.py` picks the same topic as the original on 86/86 test prompts; steered
-llama.cpp answers open like the vLLM steered answers (and unsteered like the normal ones), then drift after a
-sentence or two because llama.cpp and vLLM round differently. A topic switch reloads the model (about 5-10 s with
-F16 and `--models-max 1`).
+**Checksums of the files behind the published result** (sha256, to compare a rebuild against):
 
-## v4: one GGUF, real MoE layers, stock llama.cpp (branch `v4-moe`)
+| File | sha256 |
+|---|---|
+| `data_review/moe_v4/answers.jsonl` | `e85014889a6462d443744de9484a5a97f5558119879dea3e84b7c0d824a8d9be` |
+| `checkpoints/moe_v4/moe.pt` | `dd7b9aebf32882b8c67c31e60126f95296f0f0bceae6f022510006c2c6928c27` |
+| `Qwen3-4B-Instruct-2507-F16.gguf` | `5dfe8dfb085a35074c6e6d787ac001f56706e67297df327a29a1f21b509d8772` |
+| `Qwen3-4B-steer-v4-MoE-F16.gguf` | `35d00caba382fb0e1a593faeb07429289957fc628a47245c7b51e9847e139ba8` |
 
-`Qwen3-4B-steer-v4-MoE-F16.gguf` runs in plain llama.cpp (and LM Studio's engine) with no proxy:
-`llama-server -m Qwen3-4B-steer-v4-MoE-F16.gguf -ngl 999 --jinja`. The steering is built as MoE layers of the
-`hy_v3` architecture llama.cpp already has, and the router lives inside the model as per-token gates. It scores
-the same as v3 (3.61 vs 3.54 on the blind test). The gates pick an expert per token, not once per prompt.
-In LM Studio it is installed as `local/Qwen3-4B-steer-v4-MoE` (listed as `qwen3-4b-steer-v4-moe`, arch `hy_v3`).
-How it was built and measured: [docs/V4_MOE.md](docs/V4_MOE.md).
-Rebuild: `moe/make_data.py` -> `moe/train.py` (WSL, one card) -> `moe/export.py` -> `moe/full_test.py`.
+## Run v4
+
+- **llama.cpp:** `llama-server -m Qwen3-4B-steer-v4-MoE-F16.gguf -ngl 999 -fa on --jinja` (any build that has
+  arch `hy_v3`; tested on the tq-vulkan build b10269). Fits one 16 GB card; never tensor parallel.
+- **LM Studio:** installed as a hard link in `C:\Users\mhnda\.lmstudio\models\local\Qwen3-4B-steer-v4-MoE\`, listed
+  as `qwen3-4b-steer-v4-moe`. Works on LM Studio's ROCm 2.80.1+ and Vulkan 2.73+ engines. Use a Q8_0 or Q4_0
+  KV cache (Q4_1 has no Flash Attention kernel). With Unified KV Cache on, the log warns `Flash Attention over K/V
+  rows not supported`: that only disables an add-on for the shared cache, Flash Attention itself stays on, and
+  it happens for every model in LM Studio's engines.
+- Routing is per token; there is no per-request override. To answer unsteered, load the plain Qwen GGUF.
+
+## Archived: v3 serving (control vectors + routing proxy)
+
+Before v4, the vectors ran in llama.cpp as 31 KB control-vector GGUFs (`direction.9/18/27`) with a Python proxy
+(`gguf/serve.py`) that ran the router and switched llama-server presets per request. It worked (router 86/86 same
+picks, 23 ms on GPU) but needed the proxy, a model reload on each topic switch (8-10 s), and did not run in
+LM Studio. v4 replaces it. The code is at tag **`v3-control-vectors`**
+(`git checkout v3-control-vectors -- gguf test_gguf.py`) and in `archive/v3_control_vectors/`. The v3 vectors and
+router themselves are still current: they are v4's teacher (steps 1-6).
 
 ## What reproduces exactly, and what does not
 
@@ -145,7 +176,12 @@ Rebuild: `moe/make_data.py` -> `moe/train.py` (WSL, one card) -> `moe/export.py`
 | Picking the test vectors (step 4) | Yes: rebuilt bit for bit from the snapshots and logs (checked 2026-11-25) |
 | Training (step 3) | No: answers are sampled and Haiku's verdicts vary, so a rerun gives different vectors |
 | Full-length answers (step 6) | Mostly: greedy, but about 1 in 4 long answers changes between identical vLLM runs |
-| Haiku scores (step 7) | Close, not exact: the order shuffle is seeded, but Haiku's replies can vary slightly |
+| Haiku scores (steps 7, 14) | Close, not exact: the order shuffle is seeded, but Haiku's replies can vary slightly |
+| Base GGUF (step 9) | Yes, with the same HF revision and llama.cpp commit |
+| v4 training data (step 10) | Mostly: greedy vLLM, same caveat as step 6 |
+| v4 distillation (step 11) | Close, not exact: seeded since 2026-11-25 (the published `moe.pt` was trained before the seed was added), and GPU sums vary in the last bits |
+| v4 GGUF from a given `moe.pt` (step 12) | Yes: re-export gives the same sha256 (checked 2026-11-25) |
+| v4 full test (step 13) | Mostly: greedy, but parallel slots can change long answers |
 
 ## Hardware rules (measured on this box)
 

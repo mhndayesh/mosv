@@ -18,6 +18,8 @@ This project adapts it to a text LLM, with one vector per topic and a router (se
 | Judge | Claude Haiku 5.5, one 5-criterion rubric per topic (`rl/judge_rubrics.py`) |
 | Current vectors | Run `qwen4b_haiku_v3`, all 8 topics trained together (`--interleave`), stopped at about half the planned updates. Picked steps in `checkpoints/rl_pilot/qwen4b_haiku_v3_test` |
 | Review | Full-length blind test on 86 prompts, PDF `data_review/reports/qwen4b_full_answers.pdf` |
+| **Shipped model** | **v4**: one GGUF (`hy_v3` MoE), stock llama.cpp and LM Studio, blind average 3.61 (normal 2.89). See Result 4 |
+| Archived | v3 serving (control vectors + proxy, `gguf/`): tag `v3-control-vectors`. The v3 vectors and router stay as v4's teacher |
 
 ## Result 1: training scores (Haiku, 256-token answers)
 
@@ -69,7 +71,7 @@ What this shows, and what it does not:
 - The full test used an **fp8 KV cache**. Training and dev scoring used the default cache, because fp8 drifted from
   PyTorch in training tests. The two setups are not identical.
 
-## Result 3: runs in stock llama.cpp (2026-11-25, tag `v3-control-vectors`)
+## Result 3: runs in stock llama.cpp (2026-11-25, tag `v3-control-vectors`; archived, replaced by v4)
 
 GGUF base model + one llama.cpp control vector per topic + `gguf/serve.py` (router proxy over llama-server
 router mode). Router picks 86/86 identical to the original; 23 ms per prompt on GPU (30 s on CPU, so GPU is the
@@ -84,7 +86,8 @@ MLP = shared expert, expert 0 = none, 8 small SwiGLU topic experts, per-token to
 proxy, no custom code; also runs on LM Studio's engine. Blind Haiku average on the 80 topic prompts: normal 2.89,
 v3 3.54, **v4 3.61**. 367 tok/s with one copy per card. Routing is per token (95-99% agree with the prompt's
 topic); the owner prefers this to v3's per-prompt pick. Installed in LM Studio as `qwen3-4b-steer-v4-moe`.
-Details: [V4_MOE.md](V4_MOE.md).
+Reproducible from the repo: README steps 9-14, pinned HF revision and llama.cpp commit, sha256 of every artifact;
+re-exporting from `moe.pt` gave the identical GGUF. Details: [V4_MOE.md](V4_MOE.md).
 
 ## Open items
 
@@ -138,6 +141,8 @@ WildChat 8,809, LMSYS 6,728, ShareGPT 2,215, no_robots 1,476, Arena 922, small h
 
 | Date | Decision | Why |
 |---|---|---|
+| 2026-11-25 | v4 MoE GGUF is the shipped model; v3 serving archived | One file, no proxy, runs in LM Studio, same quality |
+| 2026-11-25 | Keep per-token routing in v4 | Owner prefers it to v3's per-prompt pick |
 | 2026-11-25 | No tensor parallel; test on one card | See the hardware rules; owner rule |
 | 2026-11-25 | Full-length answers with a loop check for the review | 256-token answers cut most answers mid-sentence; the loop check stops answers whose recent tokens are mostly one repeated block |
 | 2026-11-25 | Blind per-criterion Haiku scoring for the review | Checklist scores rewarded format, not quality |

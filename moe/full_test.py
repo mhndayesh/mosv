@@ -23,6 +23,7 @@ LLAMA = Path("C:/llm/tq-vulkan/build/bin/llama-server.exe")
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("gguf", type=Path)
+    p.add_argument("--llama", type=Path, default=LLAMA, help="llama-server.exe (any build with arch hy_v3)")
     p.add_argument("--out", type=Path, default=REPORTS / "v4_full_test.json")
     p.add_argument("--cards", default="Vulkan0,Vulkan1")
     p.add_argument("--slots", type=int, default=6, help="parallel requests per card")
@@ -32,7 +33,7 @@ def parse_args(argv=None):
 
 
 def start(args, card: str, port: int, log: Path):
-    command = [str(LLAMA), "-m", str(args.gguf), "-dev", card, "-ngl", "999", "--port", str(port),
+    command = [str(args.llama), "-m", str(args.gguf), "-dev", card, "-ngl", "999", "--port", str(port),
                "-np", str(args.slots), "-c", str(args.slots * args.slot_ctx), "-fa", "on",
                "-ctk", "q8_0", "-ctv", "q8_0", "--jinja"]
     return subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=log.open("w"))

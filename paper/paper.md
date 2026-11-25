@@ -160,7 +160,7 @@ every step can be rerun from it (see Section 8 and the README).
 | Hardware | One home PC with two AMD RX 9070 XT cards (16 GB each), ROCm, WSL. One card writes answers (vLLM), the other trains the vector (PyTorch) |
 | Code | This repository: data prep (`behaviors/`, `rl/prepare_v4.py`), router (`router/`), RL training (`rl/`), tests and reports (`reports/`) |
 | Data | Real prompts from public datasets, at most 12,000 per topic. *Links to be added.* |
-| Ready-to-run package | *In progress, not yet tested:* each vector exported as a llama.cpp control-vector GGUF (`gguf/export_vectors.py`), plus a small server (`gguf/serve.py`) that runs the router and sends each request to the matching llama.cpp setup |
+| Ready-to-run package | **Done (v4, 2026-11-25):** one GGUF, `Qwen3-4B-steer-v4-MoE-F16.gguf`, that stock llama.cpp and LM Studio run with no extra code. The vectors and router are distilled into real MoE layers (`moe/`, see `docs/V4_MOE.md`); blind Haiku average 3.61 vs 3.54 for the vectors and 2.89 for normal Qwen. An earlier tested version (control-vector GGUFs plus a routing proxy) is archived at tag `v3-control-vectors` |
 
 **Data per topic** (after cleaning, split into train, dev and test):
 
@@ -393,8 +393,8 @@ Roughly from cheapest to biggest:
    written with an engineer's help. How-to may need to be split into narrower tasks, or dropped.
 6. **A bigger, blind test**, with a second judge from another model family and some blind human ratings.
 7. **A LoRA of similar size**, trained the same way, to compare directly.
-8. **The ready-to-run package.** Finish and test the llama.cpp version (`gguf/`), so anyone can try the vectors
-   with one command.
+8. **The ready-to-run package.** Done as v4: one GGUF with the steering built in as MoE layers, runs in stock
+   llama.cpp and LM Studio. Left: a smaller Q8_0 file, and testing prompts that mix two topics (v4 routes per token).
 9. **Other models and sizes**, to see whether the idea holds beyond Qwen3-4B, and a version where the router can
    switch vectors during a conversation.
 
@@ -411,6 +411,8 @@ The full pipeline, with the exact commands and settings used for this run, is in
 6. Write the full-length answers (`reports/vllm_full_test.py`).
 7. Score them blind with Haiku (`reports/score_full.py`).
 8. Build the side-by-side PDF (`reports/build_pdf_full.py`).
+9. Build the v4 GGUF: base GGUF, v3 answers as data, distil the MoE gates and experts, export, test and score
+   (`moe/make_data.py`, `moe/train.py`, `moe/export.py`, `moe/full_test.py`; README "Build v4", with checksums).
 
 What reruns exactly: data splits, router labels, prompt picks and the choice of test vectors (rebuilt bit for bit
 from the saved logs). What does not: training itself (answers are sampled and Haiku varies), and about 1 in 4 long

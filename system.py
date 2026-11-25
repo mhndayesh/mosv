@@ -59,7 +59,7 @@ class RouterHead:
 
 def read_prompts(base, tokenizer, parts, read_layer: int, texts: list[str]) -> torch.Tensor:
     """Last-token hidden state after the read layer, on the chat-formatted prompt. `base` is the decoder stack
-    (model.model); the caller makes sure no steering is active. Also used by gguf/serve.py."""
+    (model.model); the caller makes sure no steering is active."""
     device = next(base.parameters()).device
     batch = encode(tokenizer.backend_tokenizer, texts, *parts)
     ids = torch.from_numpy(batch["input_ids"]).to(device)

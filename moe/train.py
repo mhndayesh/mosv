@@ -37,6 +37,7 @@ def parse_args(argv=None):
     p.add_argument("--ff", type=int, default=128, help="expert hidden size")
     p.add_argument("--steps", type=int, default=3000)
     p.add_argument("--recollect", action="store_true")
+    p.add_argument("--seed", type=int, default=0, help="torch seed for weight init and batch order")
     return p.parse_args(argv)
 
 
@@ -141,7 +142,9 @@ def main():
     meta = torch.from_numpy(np.load(DATA / "meta.npy"))
     labels, val, answer = meta[:, 0], meta[:, 1].bool(), meta[:, 2]
     vectors, _ = load_vectors(args.run, tuple(names[1:]))
-    saved = {"classes": names, "layers": layers, "ff": args.ff, "gate": {}, "experts": {}, "report": {}}
+    torch.manual_seed(args.seed)  # Same init and batches on rerun; GPU sums can still differ in the last bits.
+    saved = {"classes": names, "layers": layers, "ff": args.ff, "gate": {}, "experts": {}, "report": {},
+             "settings": vars(args)}
     for slot, l in enumerate(layers):
         x = torch.from_numpy(np.load(DATA / f"x_layer{l}.npy")).cuda()  # About 1.2 GB fp16 per layer.
         target = torch.stack([v[slot] for v in vectors]).cuda()  # (topics, width)
