@@ -1,11 +1,20 @@
-# Steering vectors instead of LoRA: one frozen LLM, many behaviors
+# MoSV: Mixture of Steering Vectors
 
-A frozen Qwen3-4B-Instruct-2507 gets a bank of tiny **steering vectors**, one per topic. A **router** reads each
-prompt and picks at most one vector. The vectors are trained by **RL**, with Claude Haiku as the judge. The
-model's weights never change: a vector is about 30 KB, against 8 GB for the model. **Research only.**
+**Model and files:** [huggingface.co/mhndayesh/mosv](https://huggingface.co/mhndayesh/mosv) · **Code:** [github.com/mhndayesh/mosv](https://github.com/mhndayesh/mosv)
 
-Status, results and decisions: **[docs/PROGRESS.md](docs/PROGRESS.md)**. Failed ideas and old runs:
-**[archive/FAILED_IDEAS.md](archive/FAILED_IDEAS.md)** (the folder is gitignored).
+A frozen Qwen3-4B-Instruct-2507 gets a bank of tiny **steering vectors**, one per topic. The vectors are trained by
+**RL**, with Claude Haiku as the judge. The model's weights never change: a vector is about 30 KB, against 8 GB for
+the model. **Research only.**
+
+Two versions, both in this repo:
+- **v4 (current), MoSV:** the vectors and router are built into the model as mixture-of-experts layers, picked per
+  token. One GGUF that stock llama.cpp and LM Studio run. Code `moe/`, write-up
+  [paper/paper_v4.md](paper/paper_v4.md) ([PDF](paper/paper-v4-mosv.pdf)), details [docs/V4_MOE.md](docs/V4_MOE.md).
+- **v3:** one vector per topic, a router that picks one per prompt, served as llama.cpp control vectors behind a
+  small Python proxy. Code `v3/`, write-up [paper/paper.md](paper/paper.md) ([PDF](paper/paper-v3-steering-vectors.pdf)).
+  v3's trained vectors and router are also v4's teacher.
+
+Status, results and decisions: **[docs/PROGRESS.md](docs/PROGRESS.md)**.
 
 ## Where the idea comes from
 
@@ -83,6 +92,9 @@ The experts are distilled to output the v3 vectors and the gates to give the rou
 | `reports/build_pdf_full.py` | The side-by-side PDF with bookmarks (helpers in `build_pdf_4b.py`) |
 | `moe/make_data.py`, `moe/train.py` | v4: v3's answers as training data; distil gates + experts (`checkpoints/moe_v4/moe.pt`) |
 | `moe/export.py`, `moe/full_test.py` | v4: write the `hy_v3` GGUF; full-length test in llama-server |
+| `moe/switch_test.py` | v4: per-token expert picks mid-conversation and mid-prompt (`results/v4_switches.txt`) |
+| `v3/export_vectors.py`, `v3/serve.py` | v3: vectors as llama.cpp control vectors, and the routing proxy |
+| `paper/` | Write-ups of v3 and v4 (Markdown and PDF) |
 | `evaluate.py`, `infer.py`, `model_trace.py` | Older checklist evaluation, one-off routed answers, per-token trace |
 | `test_*.py` | Tests (`python -m pytest`); `test_reports.py` covers the review scripts with no GPU |
 | `checkpoints/rl_pilot/qwen4b_haiku_v3*` | Current vectors (`_test` = the step picked per topic). Gitignored |
@@ -159,14 +171,21 @@ Light tests, no GPU: `python -m pytest test_moe.py` (gguf-tools venv for the exp
   it happens for every model in LM Studio's engines.
 - Routing is per token; there is no per-request override. To answer unsteered, load the plain Qwen GGUF.
 
-## Archived: v3 serving (control vectors + routing proxy)
+## v3: control vectors + routing proxy (folder `v3/`)
 
 Before v4, the vectors ran in llama.cpp as 31 KB control-vector GGUFs (`direction.9/18/27`) with a Python proxy
-(`gguf/serve.py`) that ran the router and switched llama-server presets per request. It worked (router 86/86 same
-picks, 23 ms on GPU) but needed the proxy, a model reload on each topic switch (8-10 s), and did not run in
-LM Studio. v4 replaces it. The code is at tag **`v3-control-vectors`**
-(`git checkout v3-control-vectors -- gguf test_gguf.py`) and in `archive/v3_control_vectors/`. The v3 vectors and
-router themselves are still current: they are v4's teacher (steps 1-6).
+(`v3/serve.py`) that runs the router and switches llama-server presets per request. It works (router 86/86 same
+picks, 23 ms on GPU) but needs the proxy, reloads the model on each topic switch (8-10 s), and does not run in
+LM Studio, so v4 replaced it as the main version. Files: `v3/vectors/steer-<topic>.gguf` and the router head
+`v3/router_qwen4b.pt` on [Hugging Face](https://huggingface.co/mhndayesh/mosv); the base GGUF is step 9 below.
+
+1. **Vectors:** `python v3/export_vectors.py` (torch + gguf-py), or download them.
+2. **One topic by hand:** `llama-server -m Qwen3-4B-Instruct-2507-F16.gguf --control-vector steer-debugging.gguf -ngl 999 --jinja`
+3. **Automatic routing:** `python v3/serve.py` (PyTorch, GPU for the router), then use `http://127.0.0.1:8091/v1`
+   from any OpenAI client. The pick comes back in `X-Steer-Route` / `X-Steer-Confidence`; send
+   `"steer": "<topic>"` or `"none"` to override.
+
+Tests: `python -m pytest test_v3.py`. Tagged state: `v3-control-vectors`.
 
 ## What reproduces exactly, and what does not
 
