@@ -26,8 +26,10 @@ class Card:
 
 
 class Pool:
-    def __init__(self, model: Path, cards: list[Card], log_dir: Path):
-        self.model, self.cards, self.log_dir, self.procs = model, cards, log_dir, []
+    def __init__(self, model: Path, cards: list[Card], log_dir: Path, top_k: int = 200):
+        # top_k 200 (measured 2026-11-26, 32 answers x 700 tokens on one card): 610 tok/s vs 458 with the full
+        # 151k-word vocabulary, which llama.cpp sorts on the CPU per token; words past the top 200 are ~0 mass.
+        self.model, self.cards, self.log_dir, self.procs, self.top_k = model, cards, log_dir, [], top_k
 
     def start(self) -> float:
         t = time.time()
@@ -64,7 +66,7 @@ class Pool:
 
     def _complete(self, port: int, prompt: list[int], max_new: int, greedy: bool, seed: int) -> dict:
         body = {"prompt": prompt, "n_predict": max_new, "return_tokens": True, "cache_prompt": True, "seed": seed,
-                "temperature": 0.0 if greedy else 1.0, "top_k": 1 if greedy else 0, "top_p": 1.0, "min_p": 0.0,
+                "temperature": 0.0 if greedy else 1.0, "top_k": 1 if greedy else self.top_k, "top_p": 1.0, "min_p": 0.0,
                 "typical_p": 1.0, "repeat_penalty": 1.0, "presence_penalty": 0.0, "frequency_penalty": 0.0}
         req = urllib.request.Request(f"http://127.0.0.1:{port}/completion", json.dumps(body).encode(),
                                      {"Content-Type": "application/json"})

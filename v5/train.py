@@ -49,7 +49,8 @@ def parse_args(argv=None):
     p.add_argument("--judge-budget", type=float, default=10.0, help="USD hard stop")
     p.add_argument("--gate-per-class", type=int, default=400)
     p.add_argument("--torch-hip", default="0", help="HIP index for PyTorch; HIP 0 = llama.cpp Vulkan1 (not the display)")
-    p.add_argument("--sample-cards", default="Vulkan0:32:1700",
+    p.add_argument("--top-k", type=int, default=200, help="sampling cut (0 = full vocabulary, 25%% slower)")
+    p.add_argument("--sample-cards", default="Vulkan0:24:1700,Vulkan1:8:1700",
                    help="llama.cpp cards as device:slots:slot_ctx, comma separated")
     p.add_argument("--chunk-tokens", type=int, default=8000, help="tokens per gradient chunk")
     p.add_argument("--compile", action="store_true", help="torch.compile the non-steer layers (project-local Triton)")
@@ -245,7 +246,7 @@ def main(argv=None):
     cards = [Card(d, 8130 + i, int(s), int(c)) for i, (d, s, c) in
              enumerate(part.split(":") for part in args.sample_cards.split(","))]
     slots = live_gguf.moe_slots(gguf)  # byte offsets read once; re-reading the 600 MB file cost ~10 s per update
-    pool = Pool(gguf, cards, folder)
+    pool = Pool(gguf, cards, folder, args.top_k)
     log.write("log.jsonl", event="servers", start_s=round(pool.start(), 2), cards=[vars(c) for c in cards])
     judge = ApiJudge(folder / "judge.jsonl", run=args.run, budget_usd=args.judge_budget,
                      concurrency=args.judge_concurrency, seed=args.seed)
