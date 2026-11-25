@@ -176,8 +176,9 @@ Light tests, no GPU: `python -m pytest test_moe.py` (gguf-tools venv for the exp
 Before v4, the vectors ran in llama.cpp as 31 KB control-vector GGUFs (`direction.9/18/27`) with a Python proxy
 (`v3/serve.py`) that runs the router and switches llama-server presets per request. It works (router 86/86 same
 picks, 23 ms on GPU) but needs the proxy, reloads the model on each topic switch (8-10 s), and does not run in
-LM Studio, so v4 replaced it as the main version. Files: `v3/vectors/steer-<topic>.gguf` and the router head
-`v3/router_qwen4b.pt` on [Hugging Face](https://huggingface.co/mhndayesh/mosv); the base GGUF is step 9 below.
+LM Studio, so v4 replaced it as the main version. Files on [Hugging Face](https://huggingface.co/mhndayesh/mosv):
+`v3/vectors/steer-<topic>.gguf` (put them in `<bundle>\vectors\`) and the router head `v3/router_qwen4b.pt` (put it
+in `checkpoints/router_qwen4b.pt`); the base GGUF is step 9 below.
 
 1. **Vectors:** `python v3/export_vectors.py` (torch + gguf-py), or download them.
 2. **One topic by hand:** `llama-server -m Qwen3-4B-Instruct-2507-F16.gguf --control-vector steer-debugging.gguf -ngl 999 --jinja`
