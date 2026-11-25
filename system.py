@@ -57,6 +57,31 @@ class RouterHead:
             return (self.linear(scaled) / self.temperature).softmax(1).cpu().numpy()
 
 
+def read_prompts(base, tokenizer, parts, read_layer: int, texts: list[str]) -> torch.Tensor:
+    """Last-token hidden state after the read layer, on the chat-formatted prompt. `base` is the decoder stack
+    (model.model); the caller makes sure no steering is active. Also used by gguf/serve.py."""
+    device = next(base.parameters()).device
+    batch = encode(tokenizer.backend_tokenizer, texts, *parts)
+    ids = torch.from_numpy(batch["input_ids"]).to(device)
+    mask = torch.from_numpy(batch["attention_mask"]).to(device)
+    positions = (mask.cumsum(1) - 1).clamp(min=0)
+    handle = base.layers[read_layer].register_forward_hook(stop_hook)
+    try:
+        with torch.inference_mode():
+            base(input_ids=ids, attention_mask=mask, position_ids=positions, use_cache=False)
+    except StopAtLayer as stopped:
+        return stopped.hidden[:, -1, :].float()
+    finally:
+        handle.remove()
+    raise RuntimeError("Read layer was never reached")
+
+
+def pick_routes(router: RouterHead, features: torch.Tensor) -> list[Route]:
+    probabilities = router.probabilities(features)
+    choices = decide(probabilities, router.threshold, len(router.classes) - 1)
+    return [Route(router.classes[c], float(p.max())) for c, p in zip(choices, probabilities)]
+
+
 class System:
     def __init__(self, model, tokenizer, bank: SteeringBank, router: RouterHead, parts, max_new_tokens=MAX_NEW_TOKENS):
         if router.classes[-1] != NONE or tuple(router.classes[:-1]) != bank.expert_names:
@@ -70,27 +95,14 @@ class System:
     # ---- routing ----------------------------------------------------------------------------
 
     def _read(self, texts: list[str]) -> torch.Tensor:
-        """Last-token hidden state after the read layer, unsteered, on the chat-formatted prompt."""
-        batch = encode(self.tokenizer.backend_tokenizer, texts, self.before, self.after, self.pad_id)
-        ids = torch.from_numpy(batch["input_ids"]).to(self.device)
-        mask = torch.from_numpy(batch["attention_mask"]).to(self.device)
-        positions = (mask.cumsum(1) - 1).clamp(min=0)
-        handle = self.model.model.layers[self.router.read_layer].register_forward_hook(stop_hook)
-        try:
-            with self.bank.choose(None), torch.inference_mode():
-                self.model.model(input_ids=ids, attention_mask=mask, position_ids=positions, use_cache=False)
-        except StopAtLayer as stopped:
-            return stopped.hidden[:, -1, :].float()
-        finally:
-            handle.remove()
-        raise RuntimeError("Read layer was never reached")
+        with self.bank.choose(None):
+            return read_prompts(self.model.model, self.tokenizer, (self.before, self.after, self.pad_id),
+                                self.router.read_layer, texts)
 
     def route(self, prompts: list[str]) -> list[Route]:
         routes = []
         for start in range(0, len(prompts), ROUTE_BATCH):
-            probabilities = self.router.probabilities(self._read(prompts[start:start + ROUTE_BATCH]))
-            choices = decide(probabilities, self.router.threshold, len(self.router.classes) - 1)
-            routes += [Route(self.router.classes[c], float(p.max())) for c, p in zip(choices, probabilities)]
+            routes += pick_routes(self.router, self._read(prompts[start:start + ROUTE_BATCH]))
         return routes
 
     # ---- generation -------------------------------------------------------------------------
