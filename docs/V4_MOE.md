@@ -101,6 +101,27 @@ v3 picks one vector per prompt. v4's gates pick an expert for **every token** (p
 
 Not done yet: RL fine-tuning of the experts (not needed so far); a Q8_0 version (`llama-quantize`).
 
+## Topic switching test (2026-11-25, `moe/switch_test.py`)
+
+PyTorch replica of v4's maths (same gates and experts from `moe.pt`); per-token logs in
+`data_review/reports/v4_switch/` (`.tsv` every token x layer 9/18/27, `.txt` text split where layer 27 switches).
+
+| Case | Part | Main expert (layer 27) |
+|---|---|---|
+| 3-turn chat | answer 1 (story) | story 100% |
+| | answer 2 (debugging) | debugging 91% |
+| | answer 3 (email) | professional_email 97% |
+| One prompt: poem + JS bug | poem part of the answer | none (not story) |
+| | bug part | debugging and none alternating, some engineering |
+| One prompt: explain + email | explanation part | none (not teaching or explanation) |
+| | email part | professional_email and none alternating |
+
+- **Between turns: works.** Each answer gets its own topic. The new user turn starts on the old topic and flips
+  partway through it, because a token only sees what came before it.
+- **Inside one mixed prompt: partly.** It does change at the section boundary, but the first task often gets
+  "none" and the second flickers token by token. The gates were only trained on single-topic chats.
+- Not checked in llama.cpp itself; the replica uses the same gate maths with PyTorch rounding.
+
 ## Reproduce
 
 Exact commands, versions (HF revision `cdbee75f`, llama.cpp `abca692`, gguf-tools venv) and sha256 of every
