@@ -7,6 +7,22 @@ model's weights never change: a vector is about 30 KB, against 8 GB for the mode
 Status, results and decisions: **[docs/PROGRESS.md](docs/PROGRESS.md)**. Failed ideas and old runs:
 **[archive/FAILED_IDEAS.md](archive/FAILED_IDEAS.md)** (the folder is gitignored).
 
+## Where the idea comes from
+
+This project adapts **"RL Post-Training in Diffusion Transformers Is Activation Steering"** by Tuna Han Salih Meral,
+Kaan Oktay, Alec Helbling, Atakan Kara, Duen Horng Chau and Pinar Yanardag
+([arXiv:2611.26627](https://arxiv.org/abs/2611.26627), project page <https://rl-is-steering.github.io>).
+
+The paper shows that a fixed set of steering vectors, added to the block outputs of a frozen image/video diffusion
+transformer, recovers most of what RL fine-tuning gains. They report 90.0-96.3% of the reward gains of six RL-tuned
+image models, with 65x fewer parameters than the RL-tuned LoRA (0.29M against 18.8M on SD3.5-M). The vectors can
+also be trained directly with online RL, starting from zero.
+
+What this repo changes:
+- **Text LLM instead of diffusion:** the vectors go on the residual stream of a frozen Qwen3-4B at 3 layers.
+- **One vector per topic instead of one shared set**, with a **router** that picks a vector, or none, per prompt.
+- **Training:** each vector is trained by group-relative RL, with Claude Haiku judging against a per-topic rubric.
+
 ## Current result (2026-11-25, run `qwen4b_haiku_v3`)
 
 Full-length answers on 86 held-out prompts, scored blind by Claude Haiku on each topic's 5-criterion rubric
