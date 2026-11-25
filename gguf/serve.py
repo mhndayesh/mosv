@@ -8,7 +8,7 @@ How it works:
 1. Starts llama-server in router mode with one preset per topic. Every preset is the same base GGUF; the topic presets
    add their control vector (gguf/export_vectors.py). llama-server loads and swaps them on demand.
 2. For each chat request, the trained router reads the last user message through layers 0..read_layer of the
-   frozen model (on CPU by default, the same code as system.py) and picks one topic or "none".
+   frozen model (on the GPU, the same code as system.py) and picks one topic or "none".
 3. The request goes to that preset. The reply carries the pick in X-Steer-Route / X-Steer-Confidence headers, and
    in a "steer" field for non-streamed replies. Send "steer": "<topic>" or "none" in the body to skip the router.
 """
@@ -47,7 +47,8 @@ def parse_args(argv=None):
     p.add_argument("--parallel", type=int, default=4)
     p.add_argument("--models-max", type=int, default=1, help="topics kept loaded at once (F16 = 8 GB each)")
     p.add_argument("--router", type=Path, default=None, help="router checkpoint (default: the profile's)")
-    p.add_argument("--router-device", default="cpu")
+    p.add_argument("--router-device", default="cuda:0",
+                   help="cuda:0 = 23 ms per prompt; cpu works but took 30 s per prompt on this PC")
     return p.parse_args(argv)
 
 
@@ -173,8 +174,10 @@ def make_handler(router: Router, topics: list[str], upstream: str):
     return Handler
 
 
-def wait_ready(url: str, seconds: int = 300) -> None:
+def wait_ready(url: str, process, seconds: int = 300) -> None:
     for _ in range(seconds):
+        if process.poll() is not None:
+            raise RuntimeError(f"llama-server exited with code {process.returncode}; see its log above")
         try:
             urllib.request.urlopen(url, timeout=2)
             return
@@ -191,12 +194,17 @@ def main(argv=None):
     if not topics:
         raise FileNotFoundError(f"No vectors in {args.bundle / 'vectors'}; run gguf/export_vectors.py first")
     presets = write_presets(args, topics)
+    # Router mode also lists the Hugging Face cache; WSL-made links there stop it, so give it an empty cache.
+    empty = args.bundle / "empty-cache"
+    empty.mkdir(exist_ok=True)
+    env = {**os.environ, "HF_HUB_CACHE": str(empty), "HF_HOME": str(empty), "LLAMA_CACHE": str(empty)}
     llama = subprocess.Popen([str(args.llama), "--models-preset", str(presets), "--models-max", str(args.models_max),
-                              "--host", "127.0.0.1", "--port", str(args.llama_port)])
+                              "--host", "127.0.0.1", "--port", str(args.llama_port)], env=env)
     try:
         router = Router(args.bundle / "hf", args.router or get_profile().router_checkpoint, args.router_device)
+        router.route("warm up")  # The first GPU call compiles kernels (about 8 s); do it before taking requests.
         upstream = f"http://127.0.0.1:{args.llama_port}"
-        wait_ready(f"{upstream}/health")
+        wait_ready(f"{upstream}/health", llama)
         server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(router, topics, upstream))
         print(json.dumps({"ready": f"http://127.0.0.1:{args.port}/v1", "topics": topics}), flush=True)
         server.serve_forever()

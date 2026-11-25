@@ -69,6 +69,7 @@ rewards; no PPO clipping, no KL term) updates only that topic's vector.
 | `reports/vllm_full_test.py` | Writes full-length normal and steered answers on vLLM |
 | `reports/score_full.py` | Blind Haiku scoring, one score per criterion, strict JSON |
 | `reports/build_pdf_full.py` | The side-by-side PDF with bookmarks (helpers in `build_pdf_4b.py`) |
+| `gguf/export_vectors.py`, `gguf/serve.py` | llama.cpp bundle: vectors as control-vector GGUFs, and the routing proxy |
 | `evaluate.py`, `infer.py`, `model_trace.py` | Older checklist evaluation, one-off routed answers, per-token trace |
 | `test_*.py` | Tests (`python -m pytest`); `test_reports.py` covers the review scripts with no GPU |
 | `checkpoints/rl_pilot/qwen4b_haiku_v3*` | Current vectors (`_test` = the step picked per topic). Gitignored |
@@ -103,6 +104,28 @@ export LD_LIBRARY_PATH=$V/lib/python3.12/site-packages/_rocm_sdk_core/lib ROCPRO
 8. **PDF** (Windows, any Python with reportlab): `python reports/build_pdf_full.py data_review/reports/qwen4b_full_answers.pdf`.
 
 Package versions: `requirements.txt`. Light tests for steps 4-8, no GPU: `python -m pytest test_reports.py`.
+
+## Run it in llama.cpp (GGUF + control vectors + router proxy)
+
+Stock llama.cpp, no custom build. The model stays a normal GGUF; each topic vector is a 31 KB llama.cpp
+**control vector** (`direction.9/18/27`, added after those layers exactly like training), the same way vision
+models ship a separate `mmproj` file. LM Studio has no control-vector support, so it can only run the plain model.
+
+Bundle folder `C:\llm\models\qwen3-4b-steer\`: `Qwen3-4B-Instruct-2507-F16.gguf`, `vectors\steer-<topic>.gguf`,
+`hf\` (config, tokenizer and weights the router reads).
+
+1. **Base GGUF:** llama.cpp's `convert_hf_to_gguf.py <hf folder> --outtype f16` (venv `~\.venvs\gguf-tools`).
+2. **Vectors:** `python gguf/export_vectors.py` (any Python with torch + gguf-py).
+3. **One topic by hand:** `llama-server -m Qwen3-4B-Instruct-2507-F16.gguf --control-vector vectors\steer-debugging.gguf -dev Vulkan1 -ngl 999 --jinja`
+4. **Automatic routing:** `C:\Users\mhnda\.venvs\ai-training-rocm-windows\Scripts\python.exe gguf/serve.py`, then use
+   `http://127.0.0.1:8091/v1` from any OpenAI client. It starts llama-server in router mode (one preset per
+   topic, same GGUF), routes each request with the trained router (GPU, 23 ms) and forwards it. The pick comes
+   back in `X-Steer-Route` / `X-Steer-Confidence`; send `"steer": "<topic>"` or `"none"` to override.
+
+Checked 2026-11-25: the router in `serve.py` picks the same topic as the original on 86/86 test prompts; steered
+llama.cpp answers open like the vLLM steered answers (and unsteered like the normal ones), then drift after a
+sentence or two because llama.cpp and vLLM round differently. A topic switch reloads the model (about 5-10 s with
+F16 and `--models-max 1`).
 
 ## What reproduces exactly, and what does not
 

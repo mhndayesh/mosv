@@ -69,6 +69,14 @@ What this shows, and what it does not:
 - The full test used an **fp8 KV cache**. Training and dev scoring used the default cache, because fp8 drifted from
   PyTorch in training tests. The two setups are not identical.
 
+## Result 3: runs in stock llama.cpp (2026-11-25, tag `v3-control-vectors`)
+
+GGUF base model + one llama.cpp control vector per topic + `gguf/serve.py` (router proxy over llama-server
+router mode). Router picks 86/86 identical to the original; 23 ms per prompt on GPU (30 s on CPU, so GPU is the
+default). End-to-end through the proxy: debugging, story, none routed correctly; steered openings match the
+vLLM steered answers; streaming works; a topic switch reloads the model (8-10 s for a 120-token answer, F16).
+Limits: LM Studio cannot load control vectors; the vectors cannot be baked into Qwen3 weights (no bias slot).
+
 ## Open items
 
 - How-to: retrain or drop. Engineering: train on longer answers, or split the topic.
