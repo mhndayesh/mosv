@@ -6,7 +6,8 @@ plus, at each steer layer, out = MLP(x) + expert_k(x), k = argmax(gate x) (sigmo
 written by this replica; then one pass over the whole chat records the expert picked at every token.
 
 Run (Windows ROCm venv, one card): python moe/switch_test.py [--hf C:/llm/models/qwen3-4b-steer/hf]
-Writes, in results/v4_switch/ (tracked in git):
+Writes results/v4_switches.txt (in git): every point in the answers where the layer-27 expert changes, with the
+text around it. Full logs go to data_review/reports/v4_switch/ (not in git):
 - summary.json: per chat part, the share of tokens per expert at each layer, and the runs at layer 27
 - <case>.tsv: one row per token: position, chat part, token text, expert at layer 9, 18, 27
 - <case>.txt: the whole chat as text, cut into pieces wherever the layer-27 expert changes, each piece
@@ -21,7 +22,8 @@ from pathlib import Path
 import torch
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / "results" / "v4_switch"  # Tracked in git: only our test prompts and v4's answers.
+OUT = ROOT / "data_review" / "reports" / "v4_switch"  # Full logs (not in git).
+SWITCHES = ROOT / "results" / "v4_switches.txt"  # In git: only the switch points in the answers.
 
 CASES = {
     "conversation: story -> debugging -> email": [
@@ -134,6 +136,22 @@ def write_logs(slug: str, tok, ids: list[int], parts, picks: dict[int, list[int]
     (OUT / f"{slug}.txt").write_text("".join(pieces).lstrip() + "\n", encoding="utf-8")
 
 
+def switch_lines(case: str, rows: list[tuple[str, str, str]], context: int = 6) -> list[str]:
+    """Every point in the answers where the layer-27 expert changes: 'part @token: old -> new | ...text...'.
+
+    rows: (chat part, token text, layer-27 expert) per token, in order.
+    """
+    out = [f"== {case}"]
+    for i in range(1, len(rows)):
+        part, _, label = rows[i]
+        if not part.startswith("assistant") or label == rows[i - 1][2] or part != rows[i - 1][0]:
+            continue
+        before = "".join(r[1] for r in rows[max(0, i - context):i])
+        after = "".join(r[1] for r in rows[i:i + context])
+        out.append(f"{part} @{i}: {rows[i - 1][2]} -> {label} | {before!r} >> {after!r}")
+    return out
+
+
 def main(argv=None):
     args = parse_args(argv)
     from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -143,7 +161,7 @@ def main(argv=None):
     tok = AutoTokenizer.from_pretrained(args.hf)
     model = AutoModelForCausalLM.from_pretrained(args.hf, dtype=torch.float16).to(args.device).eval()
     v4 = V4Layers(model, saved, args.device)
-    report = {}
+    report, switch_log = {}, []
     OUT.mkdir(parents=True, exist_ok=True)
     for case, turns in CASES.items():
         messages = []
@@ -156,6 +174,9 @@ def main(argv=None):
             model(torch.tensor([ids], device=args.device))
         slug = "".join(c if c.isalnum() else "_" for c in case.split(":")[1].strip()).strip("_")
         write_logs(slug, tok, ids, spans(tok, messages), v4.picks, names)
+        part_of = [name for name, start, end in spans(tok, messages) for _ in range(start, end)]
+        switch_log += switch_lines(case, [(part_of[i], tok.decode([t]), names[v4.picks[27][i]])
+                                          for i, t in enumerate(ids)]) + [""]
         parts = []
         for name, start, end in spans(tok, messages):
             per_layer = {}
@@ -168,6 +189,8 @@ def main(argv=None):
                               "layer18": per_layer[18], "layer27": per_layer[27]}), flush=True)
         report[case] = {"log": slug, "messages": messages, "parts": parts}
     (OUT / "summary.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+    SWITCHES.parent.mkdir(parents=True, exist_ok=True)
+    SWITCHES.write_text("\n".join(switch_log), encoding="utf-8")
     print(f"wrote {OUT}")
 
 
