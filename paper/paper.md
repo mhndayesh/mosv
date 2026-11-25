@@ -160,7 +160,7 @@ every step can be rerun from it (see Section 8 and the README).
 | Hardware | One home PC with two AMD RX 9070 XT cards (16 GB each), ROCm, WSL. One card writes answers (vLLM), the other trains the vector (PyTorch) |
 | Code | This repository: data prep (`behaviors/`, `rl/prepare_v4.py`), router (`router/`), RL training (`rl/`), tests and reports (`reports/`) |
 | Data | Real prompts from public datasets, at most 12,000 per topic. *Links to be added.* |
-| Ready-to-run package | **Done (v4, 2026-11-25):** one GGUF, `Qwen3-4B-steer-v4-MoE-F16.gguf`, that stock llama.cpp and LM Studio run with no extra code. The vectors and router are distilled into real MoE layers (`moe/`, see `docs/V4_MOE.md`); blind Haiku average 3.61 vs 3.54 for the vectors and 2.89 for normal Qwen. An earlier tested version (control-vector GGUFs plus a routing proxy) is archived at tag `v3-control-vectors` |
+| Ready-to-run package | **Done (v4, 2026-11-25):** one GGUF, `MoSV-Qwen3-4B-F16.gguf`, that stock llama.cpp and LM Studio run with no extra code. The vectors and router are distilled into real MoE layers (`moe/`, see `docs/V4_MOE.md`); blind Haiku average 3.61 vs 3.54 for the vectors and 2.89 for normal Qwen. An earlier tested version (control-vector GGUFs plus a routing proxy) is archived at tag `v3-control-vectors` |
 
 **Data per topic** (after cleaning, split into train, dev and test):
 

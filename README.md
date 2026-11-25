@@ -34,9 +34,9 @@ What this repo changes:
 
 ## Current model: v4, one GGUF for stock llama.cpp and LM Studio (2026-11-25)
 
-`Qwen3-4B-steer-v4-MoE-F16.gguf` (8.10 GB) is Qwen3-4B with the trained steering built in as real MoE layers of
+`MoSV-Qwen3-4B-F16.gguf` (8.10 GB) is Qwen3-4B with the trained steering built in as real MoE layers of
 `hy_v3`, an architecture llama.cpp already has. The router is inside the model as per-token gates. No proxy, no
-custom build: `llama-server -m Qwen3-4B-steer-v4-MoE-F16.gguf -ngl 999 --jinja`, or load it in LM Studio. Design,
+custom build: `llama-server -m MoSV-Qwen3-4B-F16.gguf -ngl 999 --jinja`, or load it in LM Studio. Design,
 measurements and limits: **[docs/V4_MOE.md](docs/V4_MOE.md)**.
 
 Full-length answers on 86 held-out prompts, scored blind by Claude Haiku on each topic's 5-criterion rubric
@@ -143,9 +143,9 @@ transformers 4.57.6, numpy 2.2.6, gguf-py installed editable from `C:\llm\tools\
 11. **Distil gates + experts** (WSL, one card): `HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 $V/bin/python moe/train.py`
     (seed 0; writes `checkpoints/moe_v4/moe.pt` with its settings and per-layer accuracy).
 12. **GGUF** (Windows, gguf-tools venv, about 2 min):
-    `python moe/export.py C:\llm\models\qwen3-4b-steer\Qwen3-4B-Instruct-2507-F16.gguf C:\llm\models\qwen3-4b-steer\Qwen3-4B-steer-v4-MoE-F16.gguf --moe checkpoints/moe_v4/moe.pt`
+    `python moe/export.py C:\llm\models\qwen3-4b-steer\Qwen3-4B-Instruct-2507-F16.gguf C:\llm\models\qwen3-4b-steer\MoSV-Qwen3-4B-F16.gguf --moe checkpoints/moe_v4/moe.pt`
     (without `--moe` it writes all-zero experts: output identical to plain Qwen, a check of the host architecture).
-13. **Full-length test** (Windows, plain Python, both cards, one full copy each): `python moe/full_test.py C:\llm\models\qwen3-4b-steer\Qwen3-4B-steer-v4-MoE-F16.gguf`
+13. **Full-length test** (Windows, plain Python, both cards, one full copy each): `python moe/full_test.py C:\llm\models\qwen3-4b-steer\MoSV-Qwen3-4B-F16.gguf`
     (`--llama` picks the llama-server.exe; default `C:\llm\tq-vulkan\build\bin\llama-server.exe`).
 14. **Score:** `$V/bin/python reports/score_full.py --answers data_review/reports/v4_full_test.json --out data_review/reports/v4_scores.json`
 
@@ -158,14 +158,14 @@ Light tests, no GPU: `python -m pytest test_moe.py` (gguf-tools venv for the exp
 | `data_review/moe_v4/answers.jsonl` | `e85014889a6462d443744de9484a5a97f5558119879dea3e84b7c0d824a8d9be` |
 | `checkpoints/moe_v4/moe.pt` | `dd7b9aebf32882b8c67c31e60126f95296f0f0bceae6f022510006c2c6928c27` |
 | `Qwen3-4B-Instruct-2507-F16.gguf` | `5dfe8dfb085a35074c6e6d787ac001f56706e67297df327a29a1f21b509d8772` |
-| `Qwen3-4B-steer-v4-MoE-F16.gguf` | `35d00caba382fb0e1a593faeb07429289957fc628a47245c7b51e9847e139ba8` |
+| `MoSV-Qwen3-4B-F16.gguf` | `35d00caba382fb0e1a593faeb07429289957fc628a47245c7b51e9847e139ba8` |
 
 ## Run v4
 
-- **llama.cpp:** `llama-server -m Qwen3-4B-steer-v4-MoE-F16.gguf -ngl 999 -fa on --jinja` (any build that has
+- **llama.cpp:** `llama-server -m MoSV-Qwen3-4B-F16.gguf -ngl 999 -fa on --jinja` (any build that has
   arch `hy_v3`; tested on the tq-vulkan build b10269). Fits one 16 GB card; never tensor parallel.
-- **LM Studio:** installed as a hard link in `C:\Users\mhnda\.lmstudio\models\local\Qwen3-4B-steer-v4-MoE\`, listed
-  as `qwen3-4b-steer-v4-moe`. Works on LM Studio's ROCm 2.80.1+ and Vulkan 2.73+ engines. Use a Q8_0 or Q4_0
+- **LM Studio:** installed as a hard link in `C:\Users\mhnda\.lmstudio\models\local\MoSV-Qwen3-4B\`, listed
+  as `mosv-qwen3-4b`. Works on LM Studio's ROCm 2.80.1+ and Vulkan 2.73+ engines. Use a Q8_0 or Q4_0
   KV cache (Q4_1 has no Flash Attention kernel). With Unified KV Cache on, the log warns `Flash Attention over K/V
   rows not supported`: that only disables an add-on for the shared cache, Flash Attention itself stays on, and
   it happens for every model in LM Studio's engines.

@@ -187,12 +187,12 @@ About 1 token in 20 at layer 9 gets a different expert. Which one was not measur
 
 ### 5.2 Speed and running it
 
-- **Stock llama.cpp:** `llama-server -m Qwen3-4B-steer-v4-MoE-F16.gguf -ngl 999 --jinja`. No proxy, no extra files.
+- **Stock llama.cpp:** `llama-server -m MoSV-Qwen3-4B-F16.gguf -ngl 999 --jinja`. No proxy, no extra files.
 - **Full test:** 86 full-length answers, one full copy of the model per card (never split across cards), 6 requests
   at a time per card: 138,947 tokens in 379 s, **367 tokens/s** in total. One answer hit the 8,192-token cap.
 - **No reloads:** switching topic is just the gate picking another expert, inside the same loaded model.
 - **LM Studio:** its current engine (llama.cpp ROCm runtime 2.80.1) includes `hy_v3`. The model is installed and
-  listed as `qwen3-4b-steer-v4-moe` (arch `hy_v3`, 4.0B, 8.10 GB). Running that engine's own server on the file gives
+  listed as `mosv-qwen3-4b` (arch `hy_v3`, 4.0B, 8.10 GB). Running that engine's own server on the file gives
   steered answers whose openings match stock llama.cpp v4.
 - **Openings match v3:** the first sentences of v4's answers match v3's steered answers. They drift later, as any two
   engines do.

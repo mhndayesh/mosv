@@ -85,7 +85,7 @@ The v3 router + vectors distilled into real MoE layers of the `hy_v3` architectu
 MLP = shared expert, expert 0 = none, 8 small SwiGLU topic experts, per-token top-1 gate). One 8.10 GB GGUF, no
 proxy, no custom code; also runs on LM Studio's engine. Blind Haiku average on the 80 topic prompts: normal 2.89,
 v3 3.54, **v4 3.61**. 367 tok/s with one copy per card. Routing is per token (95-99% agree with the prompt's
-topic); the owner prefers this to v3's per-prompt pick. Installed in LM Studio as `qwen3-4b-steer-v4-moe`.
+topic); the owner prefers this to v3's per-prompt pick. Installed in LM Studio as `mosv-qwen3-4b`.
 Reproducible from the repo: README steps 9-14, pinned HF revision and llama.cpp commit, sha256 of every artifact;
 re-exporting from `moe.pt` gave the identical GGUF. Details: [V4_MOE.md](V4_MOE.md).
 

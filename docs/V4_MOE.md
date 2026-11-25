@@ -47,7 +47,7 @@ Differences from v3, and the risks they bring:
 
 Layers 18 and 27 are easier because the steering from layer 9 is already in the hidden state.
 
-**One GGUF, stock llama.cpp:** `C:\llm\models\qwen3-4b-steer\Qwen3-4B-steer-v4-MoE-F16.gguf` (8.10 GB, 55 MB more
+**One GGUF, stock llama.cpp:** `C:\llm\models\qwen3-4b-steer\MoSV-Qwen3-4B-F16.gguf` (8.10 GB, 55 MB more
 than Qwen). 86 full-length answers with `moe/full_test.py`, one full copy per card (never tensor parallel):
 138,947 tokens in 379 s = **367 tok/s**, 1 answer hit the 8,192-token cap. Openings match the v3 steered answers.
 
@@ -70,8 +70,8 @@ v4 keeps v3's quality; the differences are within Haiku's run-to-run noise.
 **LM Studio:** its active engine (llama.cpp ROCm runtime 2.80.1) includes `hy_v3`. Running that engine's own
 `llama-server.exe` on the v4 GGUF gives steered answers whose openings match stock llama.cpp v4 (92-221 chars).
 Installed 2026-11-25 as a hardlink (no second 8 GB copy) at
-`C:\Users\mhnda\.lmstudio\models\local\Qwen3-4B-steer-v4-MoE\Qwen3-4B-steer-v4-MoE-F16.gguf`; `lms ls` lists it as
-`qwen3-4b-steer-v4-moe`, arch `hy_v3`, 4.0B, 8.10 GB. Needs an LM Studio runtime that includes `hy_v3`.
+`C:\Users\mhnda\.lmstudio\models\local\MoSV-Qwen3-4B\MoSV-Qwen3-4B-F16.gguf`; `lms ls` lists it as
+`mosv-qwen3-4b`, arch `hy_v3`, 4.0B, 8.10 GB. Needs an LM Studio runtime that includes `hy_v3`.
 
 ## How it maps onto MoE, and what is custom
 
