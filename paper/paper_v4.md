@@ -1,15 +1,15 @@
-# Token by token: task steering vectors as MoE layers inside Qwen3-4B
+# Mixture of Steering Vectors (MoSV): token-by-token task steering inside Qwen3-4B
 
-*v4 of the steering project: like a mixture of experts, but each expert is a behavior vector, chosen for every token,
-in one GGUF that stock llama.cpp and LM Studio run*
+*v4 of the steering project: a router inside the model picks one task vector, or none, for every token, in one GGUF
+that stock llama.cpp and LM Studio run*
 
 > **At a glance.**
 > - **Goal (same as [v3](paper.md)):** squeeze the most out of a small model (Qwen3-4B) by teaching it *how to
 >   behave* on each kind of task, without changing what it knows.
 > - **What is new:** v3 picked one task vector per prompt, and the whole answer was stuck with it. **v4 picks per
->   token, like a mixture of experts (MoE), but the experts are the task vectors.** At three layers, a gate inside
+>   token: a Mixture of Steering Vectors (MoSV).** At three layers, a gate inside
 >   the model picks one task vector, or none, for every token.
-> - **One file:** everything is in one GGUF, built on an MoE layout llama.cpp already has. No proxy, no custom code:
+> - **One file:** everything is in one GGUF, stored in a mixture-of-experts (MoE) layout llama.cpp already has. No proxy, no custom code:
 >   `llama-server -m <file> -ngl 999 --jinja`. It also runs in LM Studio. It adds 55 MB to the 8 GB model.
 > - **Quality:** blind test, 80 prompts: **3.61 against 2.86** for the plain model, 59 wins, 8 ties, 13 losses.
 >   The same as v3 (3.54) within the judge's noise.
@@ -29,13 +29,20 @@ teach, how to write a story) while the model itself stays frozen and keeps all i
 
 - **v3, per prompt:** a router read the prompt once and picked one vector. The whole answer was stuck with that
   choice, right or wrong, to the last token.
-- **v4, per token:** like a mixture of experts. A gate inside the model looks at every token, at layers 9, 18 and 27,
+- **v4, per token:** a Mixture of Steering Vectors (MoSV). A gate inside the model looks at every token, at layers 9, 18 and 27,
   and picks the task vector for that token, or none. The choice can change from token to token and from layer to
   layer.
 
 To be exact about "vector": in v4 each expert is a tiny network (hidden size 128) trained to output its task's v3
 vector. It reproduces that vector to within about 2% (section 5.1), so in practice it is a vector picked per token.
 It is stored as an MoE expert because that is the form llama.cpp can run without new code.
+
+**About the name.** I call it a *Mixture of Steering Vectors (MoSV)*, not a mixture of experts. It borrows MoE's
+router-and-experts shape and its file format, but the experts are not parts of the model doing the work. The whole
+model always runs, and the "experts" only add a task's steering direction on top (section 3.3). The name also avoids
+*MoV* ("Mixture of Vectors", Zadouri et al., 2023), an earlier and different method. There, each expert is an (IA)³
+vector that *multiplies* activations, all experts are blended with router weights, and everything is trained by
+supervised fine-tuning. Here, one vector is *added*, it is picked top-1 or none, and it was trained by RL with a judge.
 
 ## 2. Why a v4: v3 was hard to use
 
@@ -52,7 +59,7 @@ v3 showed the idea works: small vectors, picked per prompt, made Qwen3-4B notice
 
 The goal for v4 (my words at the time): one GGUF that llama.cpp runs with no custom code and no proxy.
 
-## 3. The idea: steering as MoE layers
+## 3. How MoSV fits into llama.cpp
 
 ### 3.1 Borrowing an MoE layout llama.cpp already has
 
@@ -82,28 +89,28 @@ gates change anything.
 | Shared expert | `blk.N.ffn_{gate,up,down}_shexp` | Qwen's original MLP for that layer, unchanged |
 | Top-k | `hy_v3` code | Top-1, sigmoid, weight 1 |
 
-Only layers 9, 18 and 27 are MoE (the same places v3 adds its vectors). The other 33 layers stay plain Qwen. The file
+Only layers 9, 18 and 27 use the MoE layout (the same places v3 adds its vectors). The other 33 layers stay plain Qwen. The file
 is 8.10 GB, 55 MB more than Qwen3-4B in F16.
 
 ```mermaid
 flowchart LR
     T[Each token] --> D1["Layers 0-8<br/>plain Qwen"]
     D1 --> M1
-    subgraph M1["Layer 9 (MoE)"]
+    subgraph M1["Layer 9 (MoSV)"]
         direction TB
         G1["Gate: none or 1 of 8"] --> E1["Picked expert<br/>(tiny, ~the v3 vector)"]
         S1["Shared expert =<br/>Qwen's own MLP"]
     end
-    M1 --> D2["Layers 10-17"] --> M2["Layer 18 (MoE)"] --> D3["Layers 19-26"] --> M3["Layer 27 (MoE)"] --> D4["Layers 28-35"]
+    M1 --> D2["Layers 10-17"] --> M2["Layer 18 (MoSV)"] --> D3["Layers 19-26"] --> M3["Layer 27 (MoSV)"] --> D4["Layers 28-35"]
     D4 --> O[Next token]
 ```
 
-At each MoE layer: `output = Qwen's MLP(x) + expert_k(x)`, where `k` is the gate's pick for that token, and expert 0
+At each steering layer: `output = Qwen's MLP(x) + expert_k(x)`, where `k` is the gate's pick for that token, and expert 0
 adds nothing.
 
-### 3.3 It is still not a normal MoE
+### 3.3 Why it is not a mixture of experts
 
-| | Normal MoE model | v4 |
+| | Mixture of experts (MoE) | MoSV (v4) |
 |---|---|---|
 | Experts | Large, they *replace* the MLP | Tiny, they sit *beside* the full MLP |
 | Experts per token | Several | One (and "none" adds nothing) |
@@ -118,7 +125,7 @@ So the claim from v3 still holds: the whole model and all its knowledge are used
 This is the heart of v4, and it is what I wanted.
 
 - **v3** reads the prompt once and picks one vector for the whole answer.
-- **v4's** gates pick an expert for **every token**, prompt and answer, at each of the 3 MoE layers, independently.
+- **v4's** gates pick an expert for **every token**, prompt and answer, at each of the 3 steering layers, independently.
   Each gate sees that token's own internal state, so the pick follows what the model is doing at that moment.
 
 What this gives:
@@ -139,8 +146,8 @@ What the switching test showed (section 5.6):
 
 ## 4. How it was built
 
-v4 was **not** trained with RL. It was taught to copy v3, a method called *distillation*: v3 is the teacher, the MoE
-experts and gates are the students. All the build code is in `moe/`. None of it is needed to run the model.
+v4 was **not** trained with RL. It was taught to copy v3, a method called *distillation*: v3 is the teacher, the gates
+and experts are the students. All the build code is in `moe/`. None of it is needed to run the model.
 
 1. **Data** (`moe/make_data.py`, vLLM, one card). From the router's labelled prompts: 200 training and 40 check
    prompts per topic, and twice that for "none" (400 + 80). That is 2,400 prompts. Each was answered greedily, up to
@@ -250,7 +257,7 @@ at every token, at layers 9, 18 and 27. Three cases: one conversation that chang
 prompts that each ask for two tasks. Full per-token logs: `data_review/reports/v4_switch/`. Every switch point with the
 text around it: `results/v4_switches.txt`.
 
-**Share of answer tokens per expert, at layer 27** (the last MoE layer):
+**Share of answer tokens per expert, at layer 27** (the last steering layer):
 
 | Case | Answer | Tokens | Experts used | Switches |
 |---|---|---|---|---|
@@ -331,7 +338,7 @@ which experts fire on "none" prompts. Neither is done yet.
 |---|---|---|
 | Files | Base GGUF + 8 vectors + router + HF copy | **One GGUF** |
 | Runs in | llama.cpp + a Python proxy | **Stock llama.cpp, LM Studio's engine** |
-| Routing | Once per prompt; the answer is stuck with it | **Every token, at 3 layers, like MoE** |
+| Routing | Once per prompt; the answer is stuck with it | **Every token, at 3 layers (MoSV)** |
 | Router | Separate PyTorch model | **Gates inside the model** |
 | Topic switch | Reloads the model (5-10 s) | **Free, inside the same model** |
 | "None" prompts | Exactly the plain model | Slightly changed (section 6.2) |
@@ -380,5 +387,7 @@ Model download and dataset links: to be added.
 
 - Meral, T. H. S., Oktay, K., Helbling, A., Kara, A., Chau, D. H., Yanardag, P. (2026). *RL Post-Training in
   Diffusion Transformers Is Activation Steering.* arXiv:2611.26627.
+- Zadouri, T., Üstün, A., Ahmadian, A., Ermiş, B., Locatelli, A., Hooker, S. (2023). *Pushing Mixture of Experts to
+  the Limit: Extremely Parameter Efficient MoE for Instruction Tuning.* arXiv:2309.05444. (MoV, related work.)
 - The v3 write-up: [paper.md](paper.md).
 - llama.cpp, `hy_v3` architecture (Hunyuan v3), build b10269.
