@@ -300,6 +300,8 @@ def main(argv=None):
         resumed = torch.load(state_path, weights_only=False)
         if "optimizer" in resumed:
             opt.load_state_dict(resumed["optimizer"])
+            for g in opt.param_groups:  # a resume may raise or lower the lr on purpose (--lr wins over the saved one)
+                g["lr"] = args.lr
         train = balanced_train(args.seed)
         dev_rows = [r for t in TOPICS for r in read(ROOT / "data_review" / "v6" / t / "dev.jsonl")[: args.dev_per_topic]]
         dev_ids = prompt_ids(tok, [r["prompt"] for r in dev_rows])
