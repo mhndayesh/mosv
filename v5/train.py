@@ -40,7 +40,9 @@ def parse_args(argv=None):
     p.add_argument("--updates", type=int, default=20)
     p.add_argument("--prompts", type=int, default=8, help="train prompts per update")
     p.add_argument("--group", type=int, default=4, help="answers per prompt")
-    p.add_argument("--max-new", type=int, default=700, help="answer tokens (~512 words, the judge's window)")
+    p.add_argument("--max-new", type=int, default=1024, help="answer tokens (~768 words, the judge's window)")
+    p.add_argument("--length-weight", type=float, default=0.1,
+                   help="reward -= weight * tokens/max_new; an answer cut at max_new pays the full weight")
     p.add_argument("--dev", type=int, default=32, help="dev prompts for the learning curve")
     p.add_argument("--eval-every", type=int, default=10)
     p.add_argument("--lr", type=float, default=1e-4)
@@ -50,7 +52,7 @@ def parse_args(argv=None):
     p.add_argument("--gate-per-class", type=int, default=400)
     p.add_argument("--torch-hip", default="0", help="HIP index for PyTorch; HIP 0 = llama.cpp Vulkan1 (not the display)")
     p.add_argument("--top-k", type=int, default=200, help="sampling cut (0 = full vocabulary, 25%% slower)")
-    p.add_argument("--sample-cards", default="Vulkan0:24:1700,Vulkan1:8:1700",
+    p.add_argument("--sample-cards", default="Vulkan0:24:2048,Vulkan1:8:2048",
                    help="llama.cpp cards as device:slots:slot_ctx, comma separated")
     p.add_argument("--chunk-tokens", type=int, default=8000, help="tokens per gradient chunk")
     p.add_argument("--compile", action="store_true", help="torch.compile the non-steer layers (project-local Triton)")
@@ -174,6 +176,12 @@ def learn(torch, model, steer, opt, prompts, completions, advantages, args, prob
             "routed": routed, "expert_norm": {l: round(float(e["down"].detach().norm()), 4) for l, e in steer.experts.items()}}
 
 
+def length_penalty(answer: dict, args) -> float:
+    """Shorter finished answers win ties; an answer cut at the cap pays the full weight."""
+    share = 1.0 if answer["stop"] == "limit" else min(len(answer["tokens"]) / args.max_new, 1.0)
+    return args.length_weight * share
+
+
 def judge_groups(judge, topic, update, prompts, answers_by_prompt) -> tuple:
     from rl.api_judge import Group
 
@@ -281,11 +289,14 @@ def main(argv=None):
             t1 = time.time()
             rewards, jstats = judge_groups(judge, args.topic, step, [r["prompt"] for r in rows], texts)
             judge_s = time.time() - t1
-            prompts, completions, advantages, flat = [], [], [], []
+            prompts, completions, advantages, flat, penalties = [], [], [], [], []
             for i, (group, reward) in enumerate(zip(sampled, rewards)):
                 if reward is None or any(a["stop"] == "error" for a in group):
                     continue
-                for answer, adv in zip(group, group_advantages(reward)):
+                cost = [length_penalty(a, args) for a in group]
+                penalties += cost
+                shaped = [r - c for r, c in zip(reward, cost)]
+                for answer, adv in zip(group, group_advantages(shaped)):
                     prompts.append(ids[i])
                     completions.append(answer["tokens"])
                     advantages.append(adv)
@@ -301,7 +312,8 @@ def main(argv=None):
             if len(prompts) < MIN_JUDGED_SHARE * args.prompts * args.group:
                 log.write("log.jsonl", **row, skipped="too few judged groups")
                 continue
-            row |= {"reward_mean": round(sum(flat) / len(flat), 4), "reward_max": max(flat), "reward_min": min(flat)}
+            row |= {"reward_mean": round(sum(flat) / len(flat), 4), "reward_max": max(flat), "reward_min": min(flat),
+                    "length_penalty_mean": round(sum(penalties) / len(penalties), 4)}
             row |= learn(torch, model, steer, opt, prompts, completions, advantages, args, probe)
             t2 = time.time()
             live_gguf.patch(gguf, steer.to_moe(), slots)

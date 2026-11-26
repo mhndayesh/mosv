@@ -79,9 +79,10 @@ Score lower if: steps are vague; the order is wrong; the advice is made up or un
 }
 
 
-# Words of each answer the judge sees (training cuts answers to about this length). v5 engineering: 512, so
-# rambling and restarts later in an answer are visible (owner, 2026-11-26). Others keep the v3 value.
-CUT_WORDS = {"engineering": 512}
+# Words of each answer the judge sees (training cuts answers to about this length). v5 engineering: 768
+# (1,024 answer tokens), so rambling, restarts and whether the answer finishes are visible (owner, 2026-11-26).
+# Others keep the v3 value.
+CUT_WORDS = {"engineering": 768}
 DEFAULT_CUT_WORDS = 190
 
 
