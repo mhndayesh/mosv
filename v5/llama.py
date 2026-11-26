@@ -26,10 +26,12 @@ class Card:
 
 
 class Pool:
-    def __init__(self, model: Path, cards: list[Card], log_dir: Path, top_k: int = 200):
+    def __init__(self, model: Path, cards: list[Card], log_dir: Path, top_k: int = 200, sampling: dict | None = None,
+                 kv: str = "f16"):
         # top_k 200 (measured 2026-11-26, 32 answers x 700 tokens on one card): 610 tok/s vs 458 with the full
         # 151k-word vocabulary, which llama.cpp sorts on the CPU per token; words past the top 200 are ~0 mass.
         self.model, self.cards, self.log_dir, self.procs, self.top_k = model, cards, log_dir, [], top_k
+        self.sampling, self.kv = sampling, kv  # sampling: the model's recommended settings (overrides the defaults)
 
     def start(self) -> float:
         t = time.time()
@@ -37,7 +39,7 @@ class Pool:
         for card in self.cards:
             cmd = [SERVER, "-m", str(self.model), "-dev", card.device, "-ngl", "99", "--port", str(card.port),
                    "-fa", "on", "-c", str(card.slots * card.slot_ctx), "-np", str(card.slots), "-b", "4096",
-                   "-ub", "1024", "--no-webui", "--no-jinja"]  # raw token prompts: no chat parsing (it 500s on odd output)
+                   "-ub", "1024", "--no-webui", "--no-jinja", "-ctk", self.kv, "-ctv", self.kv]  # raw token prompts: no chat parsing (it 500s on odd output)
             log = (self.log_dir / f"llama_{card.device}.log").open("a", encoding="utf-8")
             self.procs.append(subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT))
         for card in self.cards:
@@ -76,7 +78,10 @@ class Pool:
     def _request(self, port: int, prompt: list[int], max_new: int, greedy: bool, seed: int) -> dict:
         body = {"prompt": prompt, "n_predict": max_new, "return_tokens": True, "cache_prompt": True, "seed": seed,
                 "temperature": 0.0 if greedy else 1.0, "top_k": 1 if greedy else self.top_k, "top_p": 1.0, "min_p": 0.0,
-                "typical_p": 1.0, "repeat_penalty": 1.0, "presence_penalty": 0.0, "frequency_penalty": 0.0}
+                "typical_p": 1.0, "repeat_penalty": 1.0, "presence_penalty": 0.0, "frequency_penalty": 0.0,
+                "top_n_sigma": -1, "xtc_probability": 0.0, "dry_multiplier": 0.0}
+        if self.sampling and not greedy:
+            body.update(self.sampling)
         req = urllib.request.Request(f"http://127.0.0.1:{port}/completion", json.dumps(body).encode(),
                                      {"Content-Type": "application/json"})
         out = json.loads(urllib.request.urlopen(req, timeout=1800).read())
