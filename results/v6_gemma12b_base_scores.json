@@ -1,0 +1,110 @@
+{
+ "gemma12b_base": {
+  "all": {
+   "scored": 300,
+   "errors": 0,
+   "overall": 3.43,
+   "criteria": [
+    3.77,
+    3.26,
+    3.29,
+    3.27,
+    3.47
+   ],
+   "tokens": 711
+  },
+  "by_source": {
+   "debugging": {
+    "scored": 43,
+    "errors": 0,
+    "overall": 2.163,
+    "criteria": [
+     2.26,
+     1.42,
+     2.56,
+     2.07,
+     2.35
+    ],
+    "tokens": 821
+   },
+   "engineering": {
+    "scored": 42,
+    "errors": 0,
+    "overall": 3.595,
+    "criteria": [
+     4.02,
+     3.38,
+     3.57,
+     3.52,
+     3.74
+    ],
+    "tokens": 788
+   },
+   "explanation": {
+    "scored": 43,
+    "errors": 0,
+    "overall": 3.209,
+    "criteria": [
+     3.74,
+     3.7,
+     2.49,
+     2.86,
+     2.56
+    ],
+    "tokens": 748
+   },
+   "math_solving": {
+    "scored": 43,
+    "errors": 0,
+    "overall": 4.372,
+    "criteria": [
+     4.37,
+     4.42,
+     4.58,
+     4.51,
+     4.49
+    ],
+    "tokens": 460
+   },
+   "professional_email": {
+    "scored": 43,
+    "errors": 0,
+    "overall": 3.605,
+    "criteria": [
+     4.02,
+     2.79,
+     3.95,
+     4.0,
+     3.88
+    ],
+    "tokens": 296
+   },
+   "story": {
+    "scored": 43,
+    "errors": 0,
+    "overall": 3.349,
+    "criteria": [
+     4.07,
+     3.56,
+     2.91,
+     2.77,
+     3.49
+    ],
+    "tokens": 879
+   },
+   "teaching": {
+    "scored": 43,
+    "errors": 0,
+    "overall": 3.721,
+    "criteria": [
+     3.91,
+     3.56,
+     2.98,
+     3.14,
+     3.77
+    ],
+    "tokens": 987
+   }
+  }
+ }
+}

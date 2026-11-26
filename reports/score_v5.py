@@ -50,6 +50,7 @@ def load(topic: str, tag: str) -> list[dict]:
 
 
 async def score_one(client, gate, topic: str, row: dict) -> dict:
+    topic = row["source"] if topic == "v6" else topic  # v6: each answer is judged with its own topic's rubric
     request = {"model": MODEL, "max_tokens": 120, "thinking": {"type": "disabled"},
                "system": [{"type": "text", "text": SYSTEM.format(rubric=RUBRICS[topic]), "cache_control": {"type": "ephemeral"}}],
                "messages": [{"role": "user", "content": f"<request>\n{row['prompt']}\n</request>\n\n<answer>\n{row['answer']}\n</answer>"}],
