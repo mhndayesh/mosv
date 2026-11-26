@@ -338,7 +338,8 @@ Throughput on Gemma 4 12B with both cards (13 + 16 slots, 3,072 tokens per slot)
 | The gate finds where a strong model has room | **Proven** on dev: debugging, teaching, explanation, story pass |
 | Supervised training on checked told answers moves the experts in a steady direction | **Small test only**: 6 steps, 3 held-out answers |
 | The trained experts keep the told behavior on the locked test | **Not measured** |
-| Variety limits stop template learning | **Built**; told-story variety under the new rules is being measured |
+| Story rules without a forced opening keep variety | **Measured** (60 dev prompts): told stories open with speech 0% of the time (old kept set 100%); most repeated name 8% (Elias was 60%); story still passes the gate, 0.66 -> 0.83 |
+| Gate verdicts are stable near the thresholds | **No**: between two 60-prompt runs with unchanged rules, explanation flipped from train to skip (guard drop 5 -> 12 points) and engineering from skip to train (+14 -> +16) |
 | RL as a polish after tell-check-train | **Not built** |
 | Untrained topics and everyday prompts unchanged after training | Routing shares measured in v5; **no exact-answer test yet** |
 | Knowledge retention and very large models | **Untested** |
