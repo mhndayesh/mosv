@@ -39,6 +39,8 @@ def parse_args(argv=None):
     p.add_argument("--sampling", default="greedy", help='greedy, or JSON like {"temperature":1.0,"top_k":64,"top_p":0.95}'
                    " (the model's own recommended settings, recorded in the file header)")
     p.add_argument("--seed", type=int, default=0, help="per-answer seed base, so sampled runs repeat exactly")
+    p.add_argument("--thinking", choices=["off", "on", "template"], default="off",
+                   help="model thinking mode via chat_template_kwargs.enable_thinking (template = leave as the template decides)")
     p.add_argument("--kv", default="f16", help="llama.cpp KV cache type for both K and V (f16, q8_0, q4_0)")
     return p.parse_args(argv)
 
@@ -91,12 +93,15 @@ def sampling_fields(sampling: str, seed: int) -> dict:
     return {**json.loads(sampling), "seed": seed}
 
 
-def answer(row: dict, port: int, max_new: int, sampling: str = "greedy", seed: int = 0) -> dict:
+def answer(row: dict, port: int, max_new: int, sampling: str = "greedy", seed: int = 0, thinking: str = "off") -> dict:
     """Stream one answer; closing the stream on a loop makes llama-server stop that slot."""
-    body = json.dumps({"messages": [{"role": "user", "content": row["prompt"]}], **sampling_fields(sampling, seed),
-                       "max_tokens": max_new, "stream": True, "stream_options": {"include_usage": True}}).encode()
+    request = {"messages": [{"role": "user", "content": row["prompt"]}], **sampling_fields(sampling, seed),
+               "max_tokens": max_new, "stream": True, "stream_options": {"include_usage": True}}
+    if thinking != "template":
+        request["chat_template_kwargs"] = {"enable_thinking": thinking == "on"}
+    body = json.dumps(request).encode()
     req = urllib.request.Request(f"http://127.0.0.1:{port}/v1/chat/completions", body, {"Content-Type": "application/json"})
-    t, parts, size, checked, finish, tokens = time.time(), [], 0, 0, None, None
+    t, parts, size, checked, finish, tokens, thought = time.time(), [], 0, 0, None, None, []
     with urllib.request.urlopen(req, timeout=7200) as stream:
         for line in stream:
             if not line.startswith(b"data: ") or line.strip() == b"data: [DONE]":
@@ -105,7 +110,9 @@ def answer(row: dict, port: int, max_new: int, sampling: str = "greedy", seed: i
             if chunk.get("usage"):
                 tokens = chunk["usage"]["completion_tokens"]
             for choice in chunk.get("choices", []):
-                text = choice.get("delta", {}).get("content") or ""
+                delta = choice.get("delta", {})
+                thought.append(delta.get("reasoning_content") or "")
+                text = delta.get("content") or ""
                 parts.append(text)
                 size += len(text)
                 finish = choice.get("finish_reason") or finish
@@ -116,7 +123,8 @@ def answer(row: dict, port: int, max_new: int, sampling: str = "greedy", seed: i
                     break
     text = "".join(parts)
     return {"id": row["id"], "source": row["source"], "prompt": row["prompt"], "answer": text,
-            "tokens": tokens, "chars": len(text), "finish": finish, "seconds": round(time.time() - t, 2)}
+            "tokens": tokens, "chars": len(text), "finish": finish, "seconds": round(time.time() - t, 2),
+            "thinking": "".join(thought)}
 
 
 def main(argv=None):
@@ -140,7 +148,7 @@ def main(argv=None):
     def run(i_row):
         i, row = i_row
         seed = args.seed * 100003 + int(row["id"][:8], 16) % 100003  # fixed per prompt, so runs repeat
-        result = answer(row, ports[i % len(ports)], args.max_new, args.sampling, seed)
+        result = answer(row, ports[i % len(ports)], args.max_new, args.sampling, seed, args.thinking)
         with lock:
             with out.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(result, ensure_ascii=False) + "\n")
