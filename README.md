@@ -6,8 +6,13 @@ A frozen Qwen3-4B-Instruct-2507 gets a bank of tiny **steering vectors**, one pe
 **RL**, with Claude Haiku as the judge. The model's weights never change: a vector is about 30 KB, against 8 GB for
 the model. **Research only.**
 
-Two versions, both in this repo:
-- **v4 (current), MoSV:** the vectors and router are built into the model as mixture-of-experts layers, picked per
+Versions in this repo:
+- **v5 (branch `bonsai`), MoSV on Bonsai-4B 1-bit:** the gated expert is trained by RL straight into the shipped
+  GGUF layout, with llama.cpp writing the training answers. Engineering done: on 300 locked test prompts the trained
+  model scores higher than base on 66.2% of prompts (Haiku, each answer alone: 2.42 vs 1.95) with 268 vs 1,212-token
+  answers, 0 loops. File `MoSV-Bonsai-4B-eng-upd100.gguf` (584 MB). Code `v5/`, details
+  [docs/V5_BONSAI.md](docs/V5_BONSAI.md).
+- **v4, MoSV:** the vectors and router are built into the model as mixture-of-experts layers, picked per
   token. One GGUF that stock llama.cpp and LM Studio run. Code `moe/`, write-up
   [paper/paper_v4.md](paper/paper_v4.md) ([PDF](paper/paper-v4-mosv.pdf)), details [docs/V4_MOE.md](docs/V4_MOE.md).
 - **v3:** one vector per topic, a router that picks one per prompt, served as llama.cpp control vectors behind a

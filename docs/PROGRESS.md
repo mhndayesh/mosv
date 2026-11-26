@@ -89,6 +89,16 @@ topic); the owner prefers this to v3's per-prompt pick. Installed in LM Studio a
 Reproducible from the repo: README steps 9-14, pinned HF revision and llama.cpp commit, sha256 of every artifact;
 re-exporting from `moe.pt` gave the identical GGUF. Details: [V4_MOE.md](V4_MOE.md).
 
+## Result 5: v5, Bonsai-4B 1-bit, engineering (2026-11-26, branch `bonsai`)
+
+New engineering data (self-oss, Magpie coder medium/hard, Code Review; 3,000 train), a Fable-written behavior
+rubric, and RL that trains the gated expert directly in the GGUF layout while llama.cpp writes the answers.
+Dev win rate vs base (96 prompts, blind pairs): 53.6% (update 25), 55.7% (50), 64.6% (75), **72.9% (100)**,
+70.3% (125), 58.3% (150); the length penalty over-shortened after 100, so the run stopped and checkpoint 100 ships.
+Locked test, 300 prompts, each answer scored alone by Haiku: overall 1.95 -> **2.42**, trained higher on **66.2%**
+of prompts, 1,212 -> **268** tokens, loops 30 -> 0, cut answers 107 -> 0, 865 s -> 167 s for all 300. Code Review
+gains least (1.37 -> 1.71). Details, settings and reproduce steps: [V5_BONSAI.md](V5_BONSAI.md).
+
 ## Open items
 
 - How-to: retrain or drop. Engineering: train on longer answers, or split the topic.
