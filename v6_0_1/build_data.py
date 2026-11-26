@@ -77,11 +77,17 @@ def main(argv=None):
     p.add_argument("--copies", type=int, default=2, help="told answers per prompt (the best one that passes is kept)")
     p.add_argument("--router-per-class", type=int, default=150, help="prompts per class the router must leave alone")
     p.add_argument("--fresh", action="store_true", help="delete the cached build answers first (needed after editing behaviors.py)")
+    p.add_argument("--topics", nargs="+", help="train only these topics (each must have passed the gate); default: every topic the gate marked train")
     args = p.parse_args(argv)
 
     claim(ANSWERS.parent, fingerprint(), args.fresh)  # refuses to reuse answers written under older rules
     gate = json.loads(GATE.read_text(encoding="utf-8"))
     trained = [topic for topic, row in gate["topics"].items() if row["train"]]
+    if args.topics:  # the owner's choice, e.g. only topics that passed clearly in more than one gate run
+        refused = [t for t in args.topics if t not in gate["topics"]]
+        if refused:
+            raise SystemExit(f"--topics: no gate result for {refused}")
+        trained = list(args.topics)
     if not trained:
         raise SystemExit(f"{GATE} marks no topic for training: nothing to build")
     others = ["none", *[t for t in V6_TOPICS if t not in trained]]  # the router sends all of these to "none"
