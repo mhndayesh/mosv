@@ -21,6 +21,7 @@ This project adapts it to a text LLM, with one vector per topic and a router (se
 | **Shipped model** | **v4**: one GGUF (`hy_v3` MoE), stock llama.cpp and LM Studio, blind average 3.61 (normal 2.89). See Result 4 |
 | v3 | Control vectors + proxy, folder `v3/` (tag `v3-control-vectors`). Replaced by v4 as the main version; its vectors and router are v4's teacher |
 | **v5 (2026-11-26, branch `bonsai`)** | Bonsai-4B 1-bit, expert trained by RL straight into the GGUF (llama.cpp sampling). Engineering only so far: locked test 66.2% of prompts better than base, 2.42 vs 1.95, answers 268 vs 1,212 tokens. See Result 5 and [V5_BONSAI.md](V5_BONSAI.md) |
+| **v6 / v6.0.1 (2026-11-26, branch `bonsai`)** | Gemma 4 12B. v6.0 (the v5 RL method) gave no gain: the test had no room and the reward was noise. v6.0.1 replaces it with a headroom gate, yes/no behavior checks and supervised "tell, check, train". Code written and run end to end at small scale; full run not done. See Result 6 and [V6_GEMMA.md](V6_GEMMA.md) |
 
 ## Result 1: training scores (Haiku, 256-token answers)
 
@@ -99,6 +100,30 @@ Dev win rate vs base (96 prompts, blind pairs): 53.6% (update 25), 55.7% (50), 6
 Locked test, 300 prompts, each answer scored alone by Haiku: overall 1.95 -> **2.42**, trained higher on **66.2%**
 of prompts, 1,212 -> **268** tokens, loops 30 -> 0, cut answers 107 -> 0, 865 s -> 167 s for all 300. Code Review
 gains least (1.37 -> 1.71). Details, settings and reproduce steps: [V5_BONSAI.md](V5_BONSAI.md).
+
+## Result 6: v6 on Gemma 4 12B gave no gain; v6.0.1 fixes the method (2026-11-26, branch `bonsai`)
+
+v6.0 ran the v5 RL method on Gemma 4 12B (7 topics, recommended sampling, thinking off). Locked baseline 3.43.
+Two runs (125 and 96 updates) gave **no gain**: on 140 dev prompts scored one by one, base 3.39 and checkpoints
+3.30 to 3.41. Causes, all measured:
+
+- **No room on the test.** Same prompts, same scorer: Gemma 3.38, Gemma told the rubric 3.46, Haiku itself 3.71.
+- **The reward was noise.** The same four answers judged twice: same winner 25.5% of the time (chance 25%).
+- **Answers to one prompt do not differ enough** for trial and error: the best of 6 is 0.2 to 0.5 above average.
+- **Data.** Bug reports with no code, emails with empty key points, math that measures ability.
+
+The code was sound: experts act the same in PyTorch and in the GGUF (0.81), and the one-answer scorer repeats (88%).
+
+v6.0.1 (`v6_0_1/`): a headroom gate before training, yes/no behavior checks with a correctness guard, and
+supervised training on told answers that passed the checks. Measured so far, on dev prompts:
+
+- The yes/no checker gives the same answer twice 95 to 98% of the time.
+- Gate, 60 prompts per topic, share of behavior checks passed, plain -> told: debugging 0.17 -> 0.61, teaching
+  0.57 -> 0.99, explanation 0.34 -> 0.69, story 0.63 -> 0.79 (these four pass); engineering 0.75 -> 0.89 and
+  email 0.65 -> 0.73 are skipped.
+- Small test of the trainer (24 answers, 6 steps): held-out loss 1.214 -> 1.081, falling at every check.
+
+The full run (build data, train, locked test) has not been done. Everything else: [V6_GEMMA.md](V6_GEMMA.md).
 
 ## Open items
 

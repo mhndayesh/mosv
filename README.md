@@ -7,6 +7,10 @@ A frozen Qwen3-4B-Instruct-2507 gets a bank of tiny **steering vectors**, one pe
 the model. **Research only.**
 
 Versions in this repo:
+- **v6 and v6.0.1 (branch `bonsai`), Gemma 4 12B:** v6.0 ran the v5 RL method on a strong model and gave no gain;
+  the test had no room and the reward was noise. v6.0.1 replaces it: a headroom gate before training, yes/no
+  behavior checks, and supervised training on checked answers. Code `v6_0_1/` (run end to end at small scale; the
+  full run is not done). What went wrong and why: [docs/V6_GEMMA.md](docs/V6_GEMMA.md).
 - **v5 (branch `bonsai`), MoSV on Bonsai-4B 1-bit:** the gated expert is trained by RL straight into the shipped
   GGUF layout, with llama.cpp writing the training answers. Engineering done: on 300 locked test prompts the trained
   model scores higher than base on 66.2% of prompts (Haiku, each answer alone: 2.42 vs 1.95) with 268 vs 1,212-token
