@@ -47,6 +47,9 @@ def parse_args(argv=None):
     # bf16 step (~0.008 near 1.0), a fixed KL floor of ~0.03 that does not shrink with lr (smoke run 2026-11-26;
     # two identical passes give KL 0). llama.cpp keeps these activations in fp32, so the shipped model sees far less.
     p.add_argument("--max-kl", type=float, default=0.1)
+    # w2 (expert output scale) needs a far bigger step: at lr 1e-3..3e-3 it reached only ~0.015 per dim in 125 updates
+    # (gemma_full, no measurable gain). Experts keep --lr.
+    p.add_argument("--w2-lr", type=float, default=0.03)
     p.add_argument("--gate-per-class", type=int, default=100)
     p.add_argument("--torch-hip", default="0", help="HIP 0 = Vulkan1, the card without the display")
     p.add_argument("--sample-cards", default="Vulkan0:12:2048")
@@ -296,12 +299,14 @@ def main(argv=None):
             pool.restart()
             torch.save({"steer": steer.state(), "update": 0, "args": vars(args)}, state_path)
         steer.routed_share()
-        opt = torch.optim.AdamW(steer.parameters(), lr=args.lr, weight_decay=0.0)
+        w2s = [e["w2"] for e in steer.experts.values()]
+        rest = [t for t in steer.parameters() if all(t is not w for w in w2s)]
+        opt = torch.optim.AdamW([{"params": rest, "lr": args.lr}, {"params": w2s, "lr": args.w2_lr}], weight_decay=0.0)
         resumed = torch.load(state_path, weights_only=False)
         if "optimizer" in resumed:
             opt.load_state_dict(resumed["optimizer"])
-            for g in opt.param_groups:  # a resume may raise or lower the lr on purpose (--lr wins over the saved one)
-                g["lr"] = args.lr
+            for g, lr in zip(opt.param_groups, (args.lr, args.w2_lr)):  # --lr / --w2-lr win over the saved values
+                g["lr"] = lr
         train = balanced_train(args.seed)
         dev_rows = [r for t in TOPICS for r in read(ROOT / "data_review" / "v6" / t / "dev.jsonl")[: args.dev_per_topic]]
         dev_ids = prompt_ids(tok, [r["prompt"] for r in dev_rows])
