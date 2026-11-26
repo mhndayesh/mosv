@@ -310,6 +310,7 @@ def main(argv=None):
             log.write("log.jsonl", **row)
             log.write("samples.jsonl", **sample_row(rows, rewards, texts, step))
             if step % args.eval_every == 0 or step == args.updates:
+                torch.save({"steer": steer.state(), "update": step, "args": vars(args)}, folder / f"steer_{step:04d}.pt")
                 dev_eval(pool, tok, judge, args, dev_rows, dev_ids, base_answers, step, log)
     finally:
         pool.stop()
