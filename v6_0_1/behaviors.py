@@ -96,11 +96,14 @@ BEHAVIORS = {
         "guards": ["Does the code or review look correct for the stated task, with no claim that contradicts the code shown?"],
     },
     # Stories. The base model opens on mood or weather and tells feelings in abstract words (lines "believable
-    # characters" 2.8, "fresh detail" 3.0). The told gain was small here; the gate decides whether to train it.
+    # characters" 2.8, "fresh detail" 3.0). Third version of the rules: the second ("first sentence = an action or a
+    # line of speech") made nearly every story open with a quote and reuse names like Elias. variety.py also caps
+    # speech openings and repeated names among the kept answers.
     "story": {
         "guide": """- Write the piece in the form that was asked: story, poem or script.
-- Make the very first sentence an action or a line of speech by a character. Never open with weather, light, sound, the time of day or a general mood.
-- Use specific concrete details and names instead of stock phrases.
+- Open on something specific: a character doing something, a line of speech, or one unusual concrete detail. Choose the opening that suits this story; do not default to dialogue. Never open with weather, light, sound, the time of day or a general mood.
+- Give characters names that fit the story's setting, and avoid stock names such as Elias, Silas, Sarah or Kael.
+- Use specific concrete details instead of stock phrases.
 - Show feelings through what characters do and say, not by naming the feeling.
 - Do not explain a moral or lesson at the end.""",
         "checks": [

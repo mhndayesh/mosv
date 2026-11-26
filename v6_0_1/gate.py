@@ -26,7 +26,7 @@ from collections import defaultdict
 
 from rl.api_judge import MODEL, load_api_key
 from v6.train import BASE_GGUF
-from v6_0_1 import answers, checks
+from v6_0_1 import answers, checks, variety
 from v6_0_1.behaviors import BEHAVIORS, fingerprint
 from v6_0_1.files import DATA, RESULTS, append_row, claim, prompts, read_rows
 
@@ -145,7 +145,9 @@ def main(argv=None):
     for topic, by_variant in table.items():
         plain, told = by_variant["plain"], by_variant["told"]
         train, reason = verdict(plain["behavior"], told["behavior"], plain["guard"], told["guard"], repeat[topic])
-        report["topics"][topic] = {**by_variant, "repeat": repeat[topic], "train": train, "reason": reason}
+        report["topics"][topic] = {**by_variant, "repeat": repeat[topic], "train": train, "reason": reason,
+                                   "variety": {v: variety.report([a["answer"] for a in written if a["topic"] == topic and a["variant"] == v])
+                                               for v in ("plain", "told")}}  # speech openings and repeated names
         reference = by_variant.get("reference", {}).get("behavior")
         print(f"{topic:19s} plain {plain['behavior']:.2f} | told {told['behavior']:.2f} | reference {reference} | "
               f"guard {plain['guard']:.2f} -> {told['guard']:.2f} | repeat {repeat[topic]:.2f} | "

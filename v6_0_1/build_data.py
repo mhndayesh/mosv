@@ -28,7 +28,7 @@ from pathlib import Path
 
 from v6.train import BASE_GGUF
 from v6.train import TOPICS as V6_TOPICS  # all seven v6 topics, including the ones v6.0.1 does not train
-from v6_0_1 import answers, checks
+from v6_0_1 import answers, checks, variety
 from v6_0_1.behaviors import fingerprint
 from v6_0_1.files import DATA, RESULTS, claim, prompts, read_rows
 
@@ -120,6 +120,18 @@ def main(argv=None):
                          "behavior": best["behavior"], "base_behavior": base["behavior"],
                          "tokens": best["tokens"], "base_tokens": base["tokens"]})
 
+    # Variety limits (variety.py): for story, cap speech openings and repeated names among the kept answers,
+    # best answers first, so the experts do not learn one template.
+    for topic in variety.LIMITED_TOPICS:
+        mine = sorted([k for k in kept if k["topic"] == topic], key=lambda k: (-k["behavior"], k["tokens"]))
+        allowed, over = variety.limit(mine)
+        kept = [k for k in kept if k["topic"] != topic] + allowed
+        reasons[topic]["kept"] -= len(over)
+        reasons[topic]["repeats an opening or a name"] += len(over)
+        rejected += [{"id": k["id"], "topic": topic, "reason": "repeats an opening or a name", "plain_behavior": k["base_behavior"],
+                      "told": [{"behavior": k["behavior"], "guard": 1.0, "finish": "stop", "tokens": k["tokens"], "answer": k["answer"]}]}
+                     for k in over]
+
     # Router texts. "none" = everything to leave alone. A trained topic gets both its plain answers and its kept
     # told answers, because after training the model's own words will look like the told ones.
     router = [{"label": "none", "prompt": a["prompt"], "answer": a["answer"]} for a in written
@@ -138,7 +150,8 @@ def main(argv=None):
         report["topics"][topic] = {
             "prompts": sum(r["topic"] == topic for r in teach), "kept": len(mine), "outcomes": dict(reasons[topic]),
             "plain_behavior": mean([a["behavior"] for a in base]), "kept_behavior": mean([k["behavior"] for k in mine]),
-            "plain_tokens": round(mean([a["tokens"] for a in base])), "kept_tokens": round(mean([k["tokens"] for k in mine]))}
+            "plain_tokens": round(mean([a["tokens"] for a in base])), "kept_tokens": round(mean([k["tokens"] for k in mine])),
+            "kept_variety": variety.report([k["answer"] for k in mine])}
         print(topic, report["topics"][topic], flush=True)
     REPORT.write_text(json.dumps(report, indent=1), encoding="utf-8")
     print(f"kept {len(kept)} of {len(teach)} prompts -> {TRAIN}; rejected {len(rejected)} -> {REJECTED}", flush=True)
