@@ -20,6 +20,7 @@ This project adapts it to a text LLM, with one vector per topic and a router (se
 | Review | Full-length blind test on 86 prompts, PDF `data_review/reports/qwen4b_full_answers.pdf` |
 | **Shipped model** | **v4**: one GGUF (`hy_v3` MoE), stock llama.cpp and LM Studio, blind average 3.61 (normal 2.89). See Result 4 |
 | v3 | Control vectors + proxy, folder `v3/` (tag `v3-control-vectors`). Replaced by v4 as the main version; its vectors and router are v4's teacher |
+| **v5 (2026-11-26, branch `bonsai`)** | Bonsai-4B 1-bit, expert trained by RL straight into the GGUF (llama.cpp sampling). Engineering only so far: locked test 66.2% of prompts better than base, 2.42 vs 1.95, answers 268 vs 1,212 tokens. See Result 5 and [V5_BONSAI.md](V5_BONSAI.md) |
 
 ## Result 1: training scores (Haiku, 256-token answers)
 
