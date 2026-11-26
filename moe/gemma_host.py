@@ -60,3 +60,24 @@ def build(source: Path, out: Path, layers: dict[int, dict[str, np.ndarray]], cla
     for _, t in tensors:
         writer.write_tensor_data(np.ascontiguousarray(t) if isinstance(t, np.ndarray) else t.data)
     writer.close()
+
+
+def slots(path: Path, layers: dict[int, dict[str, np.ndarray]]) -> dict[str, tuple[int, int]]:
+    """name -> (byte offset, size) of every added tensor; read once, then patch() rewrites them in place."""
+    names = {f"blk.{l}.{s}" for l, parts in layers.items() for s in parts}
+    return {t.name: (int(t.data_offset), int(t.n_bytes)) for t in gguf.GGUFReader(path).tensors if t.name in names}
+
+
+def patch(path: Path, layers: dict[int, dict[str, np.ndarray]], where: dict[str, tuple[int, int]]) -> int:
+    written = 0
+    with open(path, "r+b") as f:
+        for l, parts in layers.items():
+            for s, array in parts.items():
+                offset, size = where[f"blk.{l}.{s}"]
+                data = np.ascontiguousarray(array).tobytes()
+                if len(data) != size:
+                    raise ValueError(f"blk.{l}.{s}: {len(data)} bytes, slot holds {size}")
+                f.seek(offset)
+                f.write(data)
+                written += size
+    return written

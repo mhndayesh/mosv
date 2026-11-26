@@ -1,0 +1,60 @@
+{
+ "settings": {
+  "per_topic": 30,
+  "copies": 1,
+  "router_per_class": 12,
+  "fresh": false,
+  "keep_min": 0.75,
+  "failed_answers": 0
+ },
+ "trained": [
+  "debugging",
+  "story",
+  "teaching"
+ ],
+ "router_texts": {
+  "none": 60,
+  "debugging": 44,
+  "story": 40,
+  "teaching": 57
+ },
+ "topics": {
+  "debugging": {
+   "prompts": 30,
+   "kept": 14,
+   "outcomes": {
+    "too few checks passed": 16,
+    "kept": 14
+   },
+   "plain_behavior": 0.167,
+   "kept_behavior": 0.821,
+   "plain_tokens": 838,
+   "kept_tokens": 504
+  },
+  "story": {
+   "prompts": 30,
+   "kept": 10,
+   "outcomes": {
+    "kept": 10,
+    "not better than plain": 17,
+    "too few checks passed": 3
+   },
+   "plain_behavior": 0.658,
+   "kept_behavior": 0.875,
+   "plain_tokens": 900,
+   "kept_tokens": 565
+  },
+  "teaching": {
+   "prompts": 30,
+   "kept": 27,
+   "outcomes": {
+    "kept": 27,
+    "guard failed": 3
+   },
+   "plain_behavior": 0.542,
+   "kept_behavior": 0.991,
+   "plain_tokens": 1012,
+   "kept_tokens": 291
+  }
+ }
+}

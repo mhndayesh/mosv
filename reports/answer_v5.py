@@ -42,7 +42,19 @@ def parse_args(argv=None):
     p.add_argument("--thinking", choices=["off", "on", "template"], default="off",
                    help="model thinking mode via chat_template_kwargs.enable_thinking (template = leave as the template decides)")
     p.add_argument("--kv", default="f16", help="llama.cpp KV cache type for both K and V (f16, q8_0, q4_0)")
+    p.add_argument("--guide", choices=["none", "rubric"], default="none",
+                   help="rubric = tell the model its topic's behavior rules in a system message (the ceiling test: "
+                        "how good is the model when told what to do). The saved prompt stays the plain one.")
     return p.parse_args(argv)
+
+
+def guide_text(topic: str) -> str:
+    """The topic's rubric as instructions to the model (never shown to the judge as part of the prompt)."""
+    import sys
+    sys.path.insert(0, str(ROOT))
+    from rl.judge_rubrics import RUBRICS
+    rules = RUBRICS[topic].replace("Score lower if:", "Avoid:")
+    return "Follow these rules when you write your answer. Do not mention the rules.\n" + rules
 
 
 def locked_v6() -> list[dict]:
@@ -107,9 +119,11 @@ def sampling_fields(sampling: str, seed: int) -> dict:
     return {**json.loads(sampling), "seed": seed}
 
 
-def answer(row: dict, port: int, max_new: int, sampling: str = "greedy", seed: int = 0, thinking: str = "off") -> dict:
+def answer(row: dict, port: int, max_new: int, sampling: str = "greedy", seed: int = 0, thinking: str = "off",
+           guide: str = "") -> dict:
     """Stream one answer; closing the stream on a loop makes llama-server stop that slot."""
-    request = {"messages": [{"role": "user", "content": row["prompt"]}], **sampling_fields(sampling, seed),
+    system = [{"role": "system", "content": guide}] if guide else []
+    request = {"messages": [*system, {"role": "user", "content": row["prompt"]}], **sampling_fields(sampling, seed),
                "max_tokens": max_new, "stream": True, "stream_options": {"include_usage": True}}
     if thinking != "template":
         request["chat_template_kwargs"] = {"enable_thinking": thinking == "on"}
@@ -162,7 +176,8 @@ def main(argv=None):
     def run(i_row):
         i, row = i_row
         seed = args.seed * 100003 + int(row["id"][:8], 16) % 100003  # fixed per prompt, so runs repeat
-        result = answer(row, ports[i % len(ports)], args.max_new, args.sampling, seed, args.thinking)
+        guide = guide_text(row["source"]) if args.guide == "rubric" else ""
+        result = answer(row, ports[i % len(ports)], args.max_new, args.sampling, seed, args.thinking, guide)
         with lock:
             with out.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(result, ensure_ascii=False) + "\n")
