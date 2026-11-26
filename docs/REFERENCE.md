@@ -63,7 +63,7 @@ Measure three things on the base model first:
 | Is there room on the test? | Base score; told score; a strong model's score | Base 1.95 | 3.38 / 3.46 / 3.71 |
 
 - Gross, varied errors and a low base score: **RL** (section 6.2) works and is the simplest path.
-- A strong, consistent base: **tell, check, train** (section 6.3). RL has nothing to pick from.
+- A strong, consistent base: **tell, check, train** (section 6.4). RL has nothing to pick from.
 
 ## 3. Data structure
 
