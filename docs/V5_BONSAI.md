@@ -101,3 +101,24 @@ Engineering prompts get short, direct answers; other prompts are routed to "none
 - Bigger models (Gemma 4 12B, Qwen3.5-9B): GGUF hosts checked in llama.cpp source (`gemma4` has a per-layer MoE
   switch like hy_v3; `qwen35moe` needs MoE on every layer + a doubled shared-expert scale). Memory needs a layer split
   across both cards. Unsloth shared-weight RL env prepared in WSL (`~/.venvs/unsloth-rl`), not yet tested on GPU.
+
+## Known weakness and wrap-up (2026-11-26)
+
+- **Code review / refactor requests get too little explanation.** Example (`results/v5_run_log.txt`): asked to
+  refactor a small function, the model only renamed a variable and added spaces (47 tokens, no explanation, no
+  simpler version). This matches the smallest test gain (Code Review 1.37 -> 1.71). Cause: the length penalty kept
+  rewarding shorter answers after they were already short enough.
+- **Verification of the shipped file** (`results/v5_verify_upd100.json`, checkpoint 100, 16 dev prompts): PyTorch vs
+  llama.cpp greedy tokens identical 14/16 (2 early fp16-vs-Vulkan splits); trained vs plain Bonsai 0/16 identical
+  (the expert is active); routing 95-97% of engineering tokens vs 1.5-3.6% of other tokens; expert output at 94% /
+  90% / 59% of the original MLP output at layers 9/18/27; GGUF = hy_v3, 253 Q1_0 + 9 F16 + 148 F32 tensors.
+- **Recommended use settings** (Bonsai's own `generation_config.json`): temperature 0.5, top_p 0.85, top_k 20,
+  min_p 0, repetition penalty 1.0. Training sampled at temperature 1.0 / top_k 200 and the tests above were greedy.
+
+## Rules for the next model (from this run)
+
+1. **Length:** penalize length only when an answer is longer than the base model's answer to the same prompt, or
+   switch the penalty off after the early updates. Never reward shorter-than-base answers.
+2. **Sampling:** train and test with the model's own recommended settings from its `generation_config.json`
+   (for Gemma 4 12B: temperature 1.0, top_k 64, top_p 0.95), and record them in every run log.
+3. **Checkpoint choice:** pick by the dev check, not the last update; keep a checkpoint at every dev check.
