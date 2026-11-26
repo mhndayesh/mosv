@@ -37,7 +37,7 @@ class Pool:
         for card in self.cards:
             cmd = [SERVER, "-m", str(self.model), "-dev", card.device, "-ngl", "99", "--port", str(card.port),
                    "-fa", "on", "-c", str(card.slots * card.slot_ctx), "-np", str(card.slots), "-b", "4096",
-                   "-ub", "1024", "--no-webui"]
+                   "-ub", "1024", "--no-webui", "--no-jinja"]  # raw token prompts: no chat parsing (it 500s on odd output)
             log = (self.log_dir / f"llama_{card.device}.log").open("a", encoding="utf-8")
             self.procs.append(subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT))
         for card in self.cards:
@@ -65,6 +65,15 @@ class Pool:
         return self.start()
 
     def _complete(self, port: int, prompt: list[int], max_new: int, greedy: bool, seed: int) -> dict:
+        """One answer; on a server error, retry once with another seed, then return stop "error" (no tokens)."""
+        for attempt in (0, 1):
+            try:
+                return self._request(port, prompt, max_new, greedy, seed + attempt * 7919)
+            except Exception as error:  # noqa: BLE001 - logged in the row, never fatal for the run
+                last = f"{type(error).__name__}: {error}"
+        return {"tokens": [], "stop": "error", "error": last}
+
+    def _request(self, port: int, prompt: list[int], max_new: int, greedy: bool, seed: int) -> dict:
         body = {"prompt": prompt, "n_predict": max_new, "return_tokens": True, "cache_prompt": True, "seed": seed,
                 "temperature": 0.0 if greedy else 1.0, "top_k": 1 if greedy else self.top_k, "top_p": 1.0, "min_p": 0.0,
                 "typical_p": 1.0, "repeat_penalty": 1.0, "presence_penalty": 0.0, "frequency_penalty": 0.0}

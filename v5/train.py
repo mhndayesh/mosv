@@ -257,7 +257,8 @@ def main(argv=None):
             pool.restart()
             torch.save({"steer": steer.state(), "update": 0, "args": vars(args)}, state_path)
         steer.routed_share()
-        opt = torch.optim.AdamW(steer.parameters(), lr=args.lr, weight_decay=0.0)
+        lr = torch.load(state_path, weights_only=False).get("lr", args.lr)  # keep a halved lr across a resume
+        opt = torch.optim.AdamW(steer.parameters(), lr=min(lr, args.lr), weight_decay=0.0)
         train = read_rows(args.topic, "train")
         random.Random(args.seed).shuffle(train)
         dev_rows = read_rows(args.topic, "dev")[: args.dev]
@@ -282,7 +283,7 @@ def main(argv=None):
             judge_s = time.time() - t1
             prompts, completions, advantages, flat = [], [], [], []
             for i, (group, reward) in enumerate(zip(sampled, rewards)):
-                if reward is None:
+                if reward is None or any(a["stop"] == "error" for a in group):
                     continue
                 for answer, adv in zip(group, group_advantages(reward)):
                     prompts.append(ids[i])
@@ -295,7 +296,8 @@ def main(argv=None):
                    "gen_tokens": gen_tokens, "gen_tok_s": round(gen_tokens / max(sample_s, 1e-6)),
                    "mean_answer_tokens": round(gen_tokens / len(answers)),
                    "hit_cap": sum(a["stop"] == "limit" for a in answers),
-                   "loops": sum(is_loop(t) for g in texts for t in g), "judge": jstats}
+                   "loops": sum(is_loop(t) for g in texts for t in g),
+                   "sample_errors": sum(a["stop"] == "error" for a in answers), "judge": jstats}
             if len(prompts) < MIN_JUDGED_SHARE * args.prompts * args.group:
                 log.write("log.jsonl", **row, skipped="too few judged groups")
                 continue
@@ -306,7 +308,8 @@ def main(argv=None):
             row["restart_s"] = round(pool.restart(), 2)
             row["sync_s"] = round(time.time() - t2, 2)
             row["update_s"] = round(time.time() - t0, 2)
-            torch.save({"steer": steer.state(), "update": step, "args": vars(args)}, state_path)
+            torch.save({"steer": steer.state(), "update": step, "args": vars(args), "lr": opt.param_groups[0]["lr"]},
+                       state_path)
             log.write("log.jsonl", **row)
             log.write("samples.jsonl", **sample_row(rows, rewards, texts, step))
             if step % args.eval_every == 0 or step == args.updates:
