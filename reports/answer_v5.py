@@ -53,9 +53,23 @@ def locked_v6() -> list[dict]:
     return [{**r, "source": r["behavior"]} for r in rows]
 
 
+V6_TOPICS = ("story", "teaching", "debugging", "math_solving", "explanation", "professional_email", "engineering")
+
+
+def v6_dev(per_topic: int = 20) -> list[dict]:
+    """First `per_topic` dev prompts of each v6 topic: for choosing a checkpoint, never the locked test."""
+    rows = []
+    for t in V6_TOPICS:
+        path = ROOT / "data_review" / "v6" / t / "dev.jsonl"
+        rows += [{**json.loads(l), "source": t} for l in path.open(encoding="utf-8")][:per_topic]
+    return rows
+
+
 def locked_prompts(topic: str) -> list[dict]:
     if topic == "v6":
         return locked_v6()
+    if topic == "v6dev":
+        return v6_dev()
     ids = set(json.loads((ROOT / "results" / "locked_v5" / f"{topic}.json").read_text(encoding="utf-8"))["test_ids"])
     path = ROOT / "data_review" / "clean_v5" / topic / "test.jsonl"
     rows = [json.loads(line) for line in path.open(encoding="utf-8")]
@@ -130,7 +144,7 @@ def answer(row: dict, port: int, max_new: int, sampling: str = "greedy", seed: i
 def main(argv=None):
     args = parse_args(argv)
     rows = locked_prompts(args.topic)
-    out = ROOT / "data_review" / "v5_runs" / args.topic / f"{args.tag}.jsonl"
+    out = ROOT / "data_review" / "v5_runs" / ("v6" if args.topic == "v6dev" else args.topic) / f"{args.tag}.jsonl"
     out.parent.mkdir(parents=True, exist_ok=True)
     done = set()
     if out.exists():

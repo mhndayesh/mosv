@@ -45,12 +45,12 @@ SCHEMA = {"type": "object", "additionalProperties": False, "required": [*CRITERI
 
 
 def load(topic: str, tag: str) -> list[dict]:
-    path = ROOT / "data_review" / "v5_runs" / topic / f"{tag}.jsonl"
+    path = ROOT / "data_review" / "v5_runs" / ("v6" if topic == "v6dev" else topic) / f"{tag}.jsonl"
     return [json.loads(line) for line in path.open(encoding="utf-8")][1:]
 
 
 async def score_one(client, gate, topic: str, row: dict) -> dict:
-    topic = row["source"] if topic == "v6" else topic  # v6: each answer is judged with its own topic's rubric
+    topic = row["source"] if topic in ("v6", "v6dev") else topic  # v6: each answer is judged with its own topic's rubric
     request = {"model": MODEL, "max_tokens": 120, "thinking": {"type": "disabled"},
                "system": [{"type": "text", "text": SYSTEM.format(rubric=RUBRICS[topic]), "cache_control": {"type": "ephemeral"}}],
                "messages": [{"role": "user", "content": f"<request>\n{row['prompt']}\n</request>\n\n<answer>\n{row['answer']}\n</answer>"}],
@@ -95,7 +95,7 @@ def main(argv=None):
     p.add_argument("--tags", nargs="+", required=True)
     p.add_argument("--concurrency", type=int, default=16)
     args = p.parse_args(argv)
-    out_dir = ROOT / "data_review" / "v5_runs" / args.topic
+    out_dir = ROOT / "data_review" / "v5_runs" / ("v6" if args.topic == "v6dev" else args.topic)
     scored = {}
     for tag in args.tags:
         rows = asyncio.run(score_all(args.topic, load(args.topic, tag), args.concurrency))
