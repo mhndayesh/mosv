@@ -1,0 +1,116 @@
+{
+ "bonsai_normal_2048": {
+  "all": {
+   "scored": 300,
+   "errors": 0,
+   "overall": 1.953,
+   "criteria": [
+    2.36,
+    2.35,
+    1.81,
+    2.17,
+    2.22
+   ],
+   "tokens": 1212
+  },
+  "by_source": {
+   "codereview": {
+    "scored": 100,
+    "errors": 0,
+    "overall": 1.37,
+    "criteria": [
+     1.71,
+     1.87,
+     1.18,
+     1.52,
+     1.79
+    ],
+    "tokens": 1682
+   },
+   "magpie_coder": {
+    "scored": 100,
+    "errors": 0,
+    "overall": 2.05,
+    "criteria": [
+     2.57,
+     2.46,
+     1.86,
+     2.23,
+     2.23
+    ],
+    "tokens": 1145
+   },
+   "self_oss": {
+    "scored": 100,
+    "errors": 0,
+    "overall": 2.44,
+    "criteria": [
+     2.81,
+     2.73,
+     2.38,
+     2.75,
+     2.64
+    ],
+    "tokens": 809
+   }
+  }
+ },
+ "mosv_upd100": {
+  "all": {
+   "scored": 300,
+   "errors": 0,
+   "overall": 2.42,
+   "criteria": [
+    2.61,
+    3.38,
+    2.37,
+    3.08,
+    2.94
+   ],
+   "tokens": 268
+  },
+  "by_source": {
+   "codereview": {
+    "scored": 100,
+    "errors": 0,
+    "overall": 1.71,
+    "criteria": [
+     1.83,
+     2.51,
+     1.53,
+     2.33,
+     2.31
+    ],
+    "tokens": 305
+   },
+   "magpie_coder": {
+    "scored": 100,
+    "errors": 0,
+    "overall": 2.65,
+    "criteria": [
+     2.92,
+     3.73,
+     2.56,
+     3.3,
+     3.11
+    ],
+    "tokens": 332
+   },
+   "self_oss": {
+    "scored": 100,
+    "errors": 0,
+    "overall": 2.9,
+    "criteria": [
+     3.08,
+     3.89,
+     3.03,
+     3.61,
+     3.41
+    ],
+    "tokens": 166
+   }
+  }
+ },
+ "second_beats_first_pct": 66.2,
+ "same_prompt_pairs": 300
+}
