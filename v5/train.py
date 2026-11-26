@@ -52,7 +52,9 @@ def parse_args(argv=None):
     p.add_argument("--gate-per-class", type=int, default=400)
     p.add_argument("--torch-hip", default="0", help="HIP index for PyTorch; HIP 0 = llama.cpp Vulkan1 (not the display)")
     p.add_argument("--top-k", type=int, default=200, help="sampling cut (0 = full vocabulary, 25%% slower)")
-    p.add_argument("--sample-cards", default="Vulkan0:24:2048,Vulkan1:8:2048",
+    # Display card only: a llama-server next to PyTorch on Vulkan1 spilled 1.1 GB into system RAM at update ~45
+    # and learning slowed from ~10 s to ~60 s per update (2026-11-26).
+    p.add_argument("--sample-cards", default="Vulkan0:32:2048",
                    help="llama.cpp cards as device:slots:slot_ctx, comma separated")
     p.add_argument("--chunk-tokens", type=int, default=8000, help="tokens per gradient chunk")
     p.add_argument("--compile", action="store_true", help="torch.compile the non-steer layers (project-local Triton)")
@@ -265,8 +267,14 @@ def main(argv=None):
             pool.restart()
             torch.save({"steer": steer.state(), "update": 0, "args": vars(args)}, state_path)
         steer.routed_share()
-        lr = torch.load(state_path, weights_only=False).get("lr", args.lr)  # keep a halved lr across a resume
-        opt = torch.optim.AdamW(steer.parameters(), lr=min(lr, args.lr), weight_decay=0.0)
+        resumed = torch.load(state_path, weights_only=False)
+        opt = torch.optim.AdamW(steer.parameters(), lr=args.lr, weight_decay=0.0)
+        if "optimizer" in resumed:  # Adam moments too, so a resume does not take one oversized first step
+            opt.load_state_dict(resumed["optimizer"])
+        for g in opt.param_groups:
+            g["lr"] = min(resumed.get("lr", args.lr), args.lr)  # keep a halved lr across a resume
+        # A fresh Adam's first steps move every weight by ~lr (KL 0.047 seen on a resume): warm up over 3 updates.
+        warmup = 0 if "optimizer" in resumed or step == 0 else 3
         train = read_rows(args.topic, "train")
         random.Random(args.seed).shuffle(train)
         dev_rows = read_rows(args.topic, "dev")[: args.dev]
@@ -314,14 +322,23 @@ def main(argv=None):
                 continue
             row |= {"reward_mean": round(sum(flat) / len(flat), 4), "reward_max": max(flat), "reward_min": min(flat),
                     "length_penalty_mean": round(sum(penalties) / len(penalties), 4)}
+            if warmup:
+                base_lr = opt.param_groups[0]["lr"]
+                for g in opt.param_groups:
+                    g["lr"] = base_lr * (4 - warmup) / 4
             row |= learn(torch, model, steer, opt, prompts, completions, advantages, args, probe)
+            if warmup:
+                for g in opt.param_groups:  # back to the base lr (halved too if the KL guard fired)
+                    g["lr"] = base_lr * (0.5 if row["rejected"] else 1.0)
+                row["warmup_lr"] = round(base_lr * (4 - warmup) / 4, 6)
+                warmup -= 1
             t2 = time.time()
             live_gguf.patch(gguf, steer.to_moe(), slots)
             row["restart_s"] = round(pool.restart(), 2)
             row["sync_s"] = round(time.time() - t2, 2)
             row["update_s"] = round(time.time() - t0, 2)
-            torch.save({"steer": steer.state(), "update": step, "args": vars(args), "lr": opt.param_groups[0]["lr"]},
-                       state_path)
+            torch.save({"steer": steer.state(), "update": step, "args": vars(args), "lr": opt.param_groups[0]["lr"],
+                        "optimizer": opt.state_dict()}, state_path)
             log.write("log.jsonl", **row)
             log.write("samples.jsonl", **sample_row(rows, rewards, texts, step))
             if step % args.eval_every == 0 or step == args.updates:
