@@ -24,7 +24,8 @@ Versions in this repo:
   v3's trained vectors and router are also v4's teacher.
 
 Status, results and decisions: **[docs/PROGRESS.md](docs/PROGRESS.md)**. Recipe for a new model, data structure, data
-rules and training methods: **[docs/REFERENCE.md](docs/REFERENCE.md)**.
+rules and training methods: **[docs/REFERENCE.md](docs/REFERENCE.md)**. The rules for training this architecture, from
+every version: **[docs/TRAINING_BIBLE.md](docs/TRAINING_BIBLE.md)**.
 
 ## Where the idea comes from
 

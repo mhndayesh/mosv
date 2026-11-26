@@ -4,7 +4,7 @@ The reusable part of this project in one place: how to take a new model from zer
 data file looks like, the rules for making data, why the training data is built the way it is, and which training
 methods worked. Numbers are measured on this box unless marked "estimate" or "not built".
 
-Version write-ups: [V4_MOE.md](V4_MOE.md) (Qwen3-4B), [V5_BONSAI.md](V5_BONSAI.md) (Bonsai-4B),
+The rules in short form: [TRAINING_BIBLE.md](TRAINING_BIBLE.md). Version write-ups: [V4_MOE.md](V4_MOE.md) (Qwen3-4B), [V5_BONSAI.md](V5_BONSAI.md) (Bonsai-4B),
 [V6_GEMMA.md](V6_GEMMA.md) (Gemma 4 12B: what went wrong and v6.0.1). Status and decisions: [PROGRESS.md](PROGRESS.md).
 
 ## 1. The idea in six lines
