@@ -25,6 +25,8 @@ def main(argv=None):
     p.add_argument("--prompts", type=int, default=8)
     p.add_argument("--tokens", type=int, default=64)
     p.add_argument("--torch-hip", default="0")
+    p.add_argument("--checkpoint", default="steer.pt", help="file inside the run folder, e.g. steer_0100.pt")
+    p.add_argument("--out", type=Path, help="also save the JSON report here (e.g. results/v5_verify_upd100.json)")
     args = p.parse_args(argv)
     os.environ["HIP_VISIBLE_DEVICES"] = os.environ["CUDA_VISIBLE_DEVICES"] = args.torch_hip
     from v5 import train as T
@@ -39,7 +41,7 @@ def main(argv=None):
     from v5.steer import LAYERS, Steer
 
     folder = ROOT / "checkpoints" / "v5" / args.run
-    saved = torch.load(folder / "steer.pt", weights_only=False)
+    saved = torch.load(folder / args.checkpoint, weights_only=False)
     topic = saved["args"]["topic"]
     tok = AutoTokenizer.from_pretrained(T.BASE_HF)
     model = AutoModelForCausalLM.from_pretrained(T.BASE_HF, dtype=torch.float16).to("cuda:0").eval()
@@ -48,7 +50,7 @@ def main(argv=None):
     steer.attach(model)
     rows = T.read_rows(topic, "dev")[: args.prompts]
     ids = T.prompt_ids(tok, [r["prompt"] for r in rows])
-    out = {"run": args.run, "update": saved["update"]}
+    out = {"run": args.run, "checkpoint": args.checkpoint, "update": saved["update"]}
 
     # 3 + 4: expert push and routing, on topic prompts and on none prompts.
     pushes = {l: [] for l in LAYERS}
@@ -111,7 +113,13 @@ def main(argv=None):
                                     "identical": sum(a == b for a, b in zip(answers["trained"], answers["base"]))}
     out["of"] = len(ids)
     out["time"] = round(time.time())
+    log = (folder / "llama_Vulkan0.log").read_text(encoding="utf-8", errors="ignore").splitlines()
+    keys = ("general.architecture", "expert_count", "expert_used_count", "expert_feed_forward_length", "file type",
+            "file size", "model params", "n_expert", "n_slots")
+    out["llama_load_log"] = sorted({line.split("]", 1)[-1].strip()[:160] for line in log[-400:] if any(k in line for k in keys)})
     (folder / "verify.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
+    if args.out:
+        args.out.write_text(json.dumps(out, indent=1), encoding="utf-8")
     print(json.dumps(out))
 
 

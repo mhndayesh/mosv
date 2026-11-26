@@ -1,0 +1,185 @@
+{
+ "run": "eng_full2",
+ "checkpoint": "steer_0100.pt",
+ "update": 100,
+ "expert_push_ratio": {
+  "9": 0.94211,
+  "18": 0.90095,
+  "27": 0.58573
+ },
+ "routed_to_expert": {
+  "topic_prompts": {
+   "9": 0.9624,
+   "18": 0.9547,
+   "27": 0.9656
+  },
+  "none_prompts": {
+   "9": 0.015,
+   "18": 0.0214,
+   "27": 0.0363
+  }
+ },
+ "torch_vs_llama_trained": {
+  "first_split": [
+   92,
+   96,
+   96,
+   96,
+   7,
+   96,
+   96,
+   22,
+   91,
+   96,
+   76,
+   96,
+   96,
+   96,
+   96,
+   96
+  ],
+  "identical": 14
+ },
+ "trained_vs_base_llama": {
+  "first_split": [
+   33,
+   0,
+   19,
+   15,
+   0,
+   37,
+   18,
+   4,
+   12,
+   14,
+   0,
+   0,
+   4,
+   13,
+   3,
+   0
+  ],
+  "identical": 0
+ },
+ "of": 16,
+ "time": 1795662008,
+ "gguf": {
+  "file": "MoSV-Bonsai-4B-eng-upd100.gguf",
+  "metadata": {
+   "general.architecture": "hy_v3",
+   "hy_v3.block_count": 36,
+   "hy_v3.embedding_length": 2560,
+   "hy_v3.expert_count": 2,
+   "hy_v3.expert_used_count": 1,
+   "hy_v3.expert_feed_forward_length": 128,
+   "hy_v3.expert_shared_feed_forward_length": 9728,
+   "hy_v3.expert_gating_func": 2,
+   "hy_v3.expert_weights_norm": true,
+   "hy_v3.expert_weights_scale": 1.0,
+   "steer.classes": [
+    "none",
+    "engineering"
+   ]
+  },
+  "tensor_types": {
+   "F32": 148,
+   "Q1_0": 253,
+   "F16": 9
+  },
+  "moe_tensors": {
+   "blk.9.ffn_gate_inp.weight": [
+    "F32",
+    [
+     2560,
+     2
+    ]
+   ],
+   "blk.9.ffn_gate_exps.weight": [
+    "F16",
+    [
+     2560,
+     128,
+     2
+    ]
+   ],
+   "blk.9.ffn_up_exps.weight": [
+    "F16",
+    [
+     2560,
+     128,
+     2
+    ]
+   ],
+   "blk.9.ffn_down_exps.weight": [
+    "F16",
+    [
+     128,
+     2560,
+     2
+    ]
+   ],
+   "blk.18.ffn_gate_inp.weight": [
+    "F32",
+    [
+     2560,
+     2
+    ]
+   ],
+   "blk.18.ffn_gate_exps.weight": [
+    "F16",
+    [
+     2560,
+     128,
+     2
+    ]
+   ],
+   "blk.18.ffn_up_exps.weight": [
+    "F16",
+    [
+     2560,
+     128,
+     2
+    ]
+   ],
+   "blk.18.ffn_down_exps.weight": [
+    "F16",
+    [
+     128,
+     2560,
+     2
+    ]
+   ],
+   "blk.27.ffn_gate_inp.weight": [
+    "F32",
+    [
+     2560,
+     2
+    ]
+   ],
+   "blk.27.ffn_gate_exps.weight": [
+    "F16",
+    [
+     2560,
+     128,
+     2
+    ]
+   ],
+   "blk.27.ffn_up_exps.weight": [
+    "F16",
+    [
+     2560,
+     128,
+     2
+    ]
+   ],
+   "blk.27.ffn_down_exps.weight": [
+    "F16",
+    [
+     128,
+     2560,
+     2
+    ]
+   ]
+  }
+ }
+}
