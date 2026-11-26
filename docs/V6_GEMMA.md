@@ -1,6 +1,7 @@
 # v6 on Gemma 4 12B: what went wrong, what is right, and v6.0.1
 
 Branch `bonsai`, 2026-11-26. Code: `v6/` (the RL version that gave no gain) and `v6_0_1/` (the corrected version).
+The reusable recipe, the data structure, the data rules and the training methods are in [REFERENCE.md](REFERENCE.md).
 
 **In four lines**
 
@@ -197,7 +198,7 @@ Run every stage from the repo root in the `ai-training-rocm-windows` venv, with 
 | Step | Command | What it does | Time | Writes |
 |---|---|---|---|---|
 | 1 | `python -m v6_0_1.gate` | Plain, told and Haiku answers on dev prompts; yes/no checks, twice; a train / skip verdict per topic | about 25 min | `results/v6_0_1_gate.json` |
-| 2 | `python -m v6_0_1.build_data --per-topic 300` | For the topics marked "train": plain and told answers on training prompts, checks, keeps the answers that pass | about 1.5 hours for 3 topics (estimate from 0.6 answers per second) | `data_review/v6_0_1/{train,router,rejected}.jsonl`, `results/v6_0_1_data.json` |
+| 2 | `python -m v6_0_1.build_data --per-topic 300` | For the topics marked "train": plain and told answers on training prompts, checks, keeps the answers that pass | about 2 hours for the 4 passing topics (estimate from 0.6 answers per second) | `data_review/v6_0_1/{train,router,rejected}.jsonl`, `results/v6_0_1_data.json` |
 | 3 | `python -m v6_0_1.train --run NAME` | Fits the router, then supervised training of the experts on the kept answers | measured 4 s per step of 8 short answers; about 30 min for 500 kept answers (estimate) | `checkpoints/v6_0_1/NAME/` |
 | 4 | `python -m v6_0_1.evaluate --run NAME --checkpoint steer_XXXX.pt --split dev --per-topic 60` | Builds the GGUF, answers plain prompts with it and with the base model, checks both | about 25 min (estimate) | `results/v6_0_1_eval_dev_...json` |
 | 5 | The same with `--split test`, once, for the picked checkpoint | The locked 300 | about 20 min (estimate) | `results/v6_0_1_eval_test_...json` |

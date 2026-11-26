@@ -23,7 +23,8 @@ Versions in this repo:
   small Python proxy. Code `v3/`, write-up [paper/paper.md](paper/paper.md) ([PDF](paper/paper-v3-steering-vectors.pdf)).
   v3's trained vectors and router are also v4's teacher.
 
-Status, results and decisions: **[docs/PROGRESS.md](docs/PROGRESS.md)**.
+Status, results and decisions: **[docs/PROGRESS.md](docs/PROGRESS.md)**. Recipe for a new model, data structure, data
+rules and training methods: **[docs/REFERENCE.md](docs/REFERENCE.md)**.
 
 ## Where the idea comes from
 

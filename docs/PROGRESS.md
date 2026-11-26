@@ -2,7 +2,8 @@
 
 Goal: replace LoRA with tiny steering vectors inside a frozen model, trained by RL, with one router choosing at
 most one vector per request. Research only. Failed ideas, old runs and their verdicts are in
-[`../archive/FAILED_IDEAS.md`](../archive/FAILED_IDEAS.md).
+[`../archive/FAILED_IDEAS.md`](../archive/FAILED_IDEAS.md). The reusable recipe, data structure, data rules and training
+methods are in [REFERENCE.md](REFERENCE.md).
 
 Inspiration: Meral et al., "RL Post-Training in Diffusion Transformers Is Activation Steering"
 ([arXiv:2611.26627](https://arxiv.org/abs/2611.26627)). That paper uses one shared vector set on diffusion models.
