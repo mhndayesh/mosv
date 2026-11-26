@@ -29,17 +29,31 @@ LOOP_WINDOW, LOOP_REPEATS, LOOP_CHECK_EVERY = 400, 4, 200  # chars, earlier copi
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--topic", required=True)
+    p.add_argument("--topic", required=True, help="a v5 topic (e.g. engineering), or v6 = the locked 7-topic test")
     p.add_argument("--model", required=True, type=Path)
     p.add_argument("--tag", required=True, help="output name, e.g. bonsai_normal")
     p.add_argument("--max-new", type=int, default=2048, help="tokens per answer at most")
     p.add_argument("--slot-ctx", type=int, default=3072, help="tokens per slot: prompt (up to ~1,000) + answer")
     p.add_argument("--slots", default="23,32", help="parallel answers per card, card0,card1 (~144 KB per token: "
                    "23 x 3,072 fits card0 next to the display, 32 x 3,072 fits card1)")
+    p.add_argument("--sampling", default="greedy", help='greedy, or JSON like {"temperature":1.0,"top_k":64,"top_p":0.95}'
+                   " (the model's own recommended settings, recorded in the file header)")
+    p.add_argument("--seed", type=int, default=0, help="per-answer seed base, so sampled runs repeat exactly")
+    p.add_argument("--kv", default="f16", help="llama.cpp KV cache type for both K and V (f16, q8_0, q4_0)")
     return p.parse_args(argv)
 
 
+def locked_v6() -> list[dict]:
+    lock = json.loads((ROOT / "results" / "locked_v6.json").read_text(encoding="utf-8"))
+    rows = [json.loads(line) for line in (ROOT / "data_review" / "v6" / "test.jsonl").open(encoding="utf-8")]
+    if [[r["id"], r["behavior"]] for r in rows] != lock["ids"]:
+        raise SystemExit("data_review/v6/test.jsonl does not match results/locked_v6.json")
+    return [{**r, "source": r["behavior"]} for r in rows]
+
+
 def locked_prompts(topic: str) -> list[dict]:
+    if topic == "v6":
+        return locked_v6()
     ids = set(json.loads((ROOT / "results" / "locked_v5" / f"{topic}.json").read_text(encoding="utf-8"))["test_ids"])
     path = ROOT / "data_review" / "clean_v5" / topic / "test.jsonl"
     rows = [json.loads(line) for line in path.open(encoding="utf-8")]
@@ -52,9 +66,9 @@ def per_card(value: str) -> list[int]:
     return [int(v) for v in value.split(",")]
 
 
-def start(model: Path, card: str, port: int, slot_ctx: int, slots: int) -> subprocess.Popen:
+def start(model: Path, card: str, port: int, slot_ctx: int, slots: int, kv: str = "f16") -> subprocess.Popen:
     cmd = [SERVER, "-m", str(model), "-dev", card, "-ngl", "99", "--port", str(port), "-fa", "on",
-           "-c", str(slot_ctx * slots), "-np", str(slots), "-b", "4096", "-ub", "1024"]
+           "-c", str(slot_ctx * slots), "-np", str(slots), "-b", "4096", "-ub", "1024", "-ctk", kv, "-ctv", kv]
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for _ in range(180):
         try:
@@ -71,9 +85,15 @@ def is_loop(text: str) -> bool:
     return len(text) > LOOP_WINDOW * (LOOP_REPEATS + 1) and text[:-LOOP_WINDOW].count(tail) >= LOOP_REPEATS
 
 
-def answer(row: dict, port: int, max_new: int) -> dict:
-    """Stream one greedy answer; closing the stream on a loop makes llama-server stop that slot."""
-    body = json.dumps({"messages": [{"role": "user", "content": row["prompt"]}], "temperature": 0,
+def sampling_fields(sampling: str, seed: int) -> dict:
+    if sampling == "greedy":
+        return {"temperature": 0}
+    return {**json.loads(sampling), "seed": seed}
+
+
+def answer(row: dict, port: int, max_new: int, sampling: str = "greedy", seed: int = 0) -> dict:
+    """Stream one answer; closing the stream on a loop makes llama-server stop that slot."""
+    body = json.dumps({"messages": [{"role": "user", "content": row["prompt"]}], **sampling_fields(sampling, seed),
                        "max_tokens": max_new, "stream": True, "stream_options": {"include_usage": True}}).encode()
     req = urllib.request.Request(f"http://127.0.0.1:{port}/v1/chat/completions", body, {"Content-Type": "application/json"})
     t, parts, size, checked, finish, tokens = time.time(), [], 0, 0, None, None
@@ -108,7 +128,7 @@ def main(argv=None):
     if out.exists():
         done = {json.loads(l).get("id") for l in out.open(encoding="utf-8")} - {None}
     else:
-        settings = {**{k: str(v) for k, v in vars(args).items()}, "kv": "f16, separate slots", "temperature": 0,
+        settings = {**{k: str(v) for k, v in vars(args).items()}, "kv": f"{args.kv}, separate slots",
                     "loop_rule": f"last {LOOP_WINDOW} chars seen {LOOP_REPEATS}x earlier"}
         out.write_text(json.dumps({"settings": settings}) + "\n", encoding="utf-8")
     todo = [r for r in rows if r["id"] not in done]
@@ -119,7 +139,8 @@ def main(argv=None):
 
     def run(i_row):
         i, row = i_row
-        result = answer(row, ports[i % len(ports)], args.max_new)
+        seed = args.seed * 100003 + int(row["id"][:8], 16) % 100003  # fixed per prompt, so runs repeat
+        result = answer(row, ports[i % len(ports)], args.max_new, args.sampling, seed)
         with lock:
             with out.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(result, ensure_ascii=False) + "\n")
@@ -127,7 +148,7 @@ def main(argv=None):
             if count[0] % 10 == 0 or count[0] == len(rows):
                 print(f"{count[0]}/{len(rows)} done, {round(time.time() - t)} s", flush=True)
 
-    servers = [start(args.model, card, port, args.slot_ctx, n) for (card, port), n in zip(CARDS, slots)]
+    servers = [start(args.model, card, port, args.slot_ctx, n, args.kv) for (card, port), n in zip(CARDS, slots)]
     try:
         with ThreadPoolExecutor(sum(slots)) as pool:
             list(pool.map(run, enumerate(todo)))
