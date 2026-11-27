@@ -1,10 +1,13 @@
 # MoSV: Mixture of Steering Vectors
 
-**Model and files:** [huggingface.co/mhndayesh/mosv](https://huggingface.co/mhndayesh/mosv) · **Code:** [github.com/mhndayesh/mosv](https://github.com/mhndayesh/mosv)
+**Current model:** [huggingface.co/mhndayesh/MoSV-Gemma-4-12B-v6.0.1](https://huggingface.co/mhndayesh/MoSV-Gemma-4-12B-v6.0.1) · **Earlier models (Qwen3-4B):** [huggingface.co/mhndayesh/mosv](https://huggingface.co/mhndayesh/mosv) · **Code:** [github.com/mhndayesh/mosv](https://github.com/mhndayesh/mosv)
 
-A frozen Qwen3-4B-Instruct-2507 gets a bank of tiny **steering vectors**, one per topic. The vectors are trained by
-**RL**, with Claude Haiku as the judge. The model's weights never change: a vector is about 30 KB, against 8 GB for
-the model. **Research only.**
+A frozen language model gets small **steering experts**, one per topic, and a router that picks one per token, or
+"none". The model's own weights never change: the experts are a few MB against several GB for the model, and the
+result ships as one GGUF that stock llama.cpp and LM Studio run. The main model is now **Gemma 4 12B** (v6.0.1);
+the earlier Qwen3-4B versions (v3, v4) stay in the repo and on Hugging Face. **Research only.**
+
+![Gemma results](paper/figures_v6_0_1/1_gemma_results.png)
 
 Versions in this repo:
 - **v6 and v6.0.1 (branch `bonsai`), Gemma 4 12B:** v6.0 ran the v5 RL method on a strong model and gave no gain;
@@ -43,11 +46,55 @@ image models, with 65x fewer parameters than the RL-tuned LoRA (0.29M against 18
 also be trained directly with online RL, starting from zero.
 
 What this repo changes:
-- **Text LLM instead of diffusion:** the vectors go on the residual stream of a frozen Qwen3-4B at 3 layers.
-- **One vector per topic instead of one shared set**, with a **router** that picks a vector, or none, per prompt.
-- **Training:** each vector is trained by group-relative RL, with Claude Haiku judging against a per-topic rubric.
+- **Text LLM instead of diffusion:** the vectors go on the residual stream of a frozen LLM at 3 layers (Qwen3-4B
+  in v3-v4, Gemma 4 12B in v6.0.1).
+- **One vector per topic instead of one shared set**, with a **router** that picks a vector, or none, per prompt
+  (per token since v4).
+- **Training:** v3-v5 trained each vector by group-relative RL with Claude Haiku as judge. On Gemma, RL gave no
+  gain, so v6.0.1 trains supervised on Haiku-checked answers.
 
-## Current model: v4, one GGUF for stock llama.cpp and LM Studio (2026-11-25)
+## Current model: MoSV-Gemma-4-12B v6.0.1 (2026-11-27)
+
+`MoSV-Gemma-4-12B-v6.0.1-Q4_K_M.gguf` (7.16 GB) is Gemma 4 12B Q4_K_M plus 36 MB of experts and routers, at layers
+12, 24 and 36: 4 experts each (none, debugging, story, teaching), top-1 per token, as llama.cpp's own `gemma4`
+architecture. Download: [huggingface.co/mhndayesh/MoSV-Gemma-4-12B-v6.0.1](https://huggingface.co/mhndayesh/MoSV-Gemma-4-12B-v6.0.1).
+Model card: [release/MoSV-Gemma-4-12B-v6.0.1/README.md](release/MoSV-Gemma-4-12B-v6.0.1/README.md).
+
+```
+llama-server -m MoSV-Gemma-4-12B-v6.0.1-Q4_K_M.gguf -ngl 99 -fa on --jinja
+```
+
+Use Gemma's recommended sampling (temperature 1.0, top_k 64, top_p 0.95, min_p 0) with thinking off
+(`chat_template_kwargs: {"enable_thinking": false}`). In LM Studio, load it as any GGUF.
+
+Locked test: 300 prompts set aside before training, plain prompts with no instructions, answered by the GGUF in
+llama.cpp, each answer judged alone by Claude Haiku with yes/no behavior checks.
+
+| Topic | Behavior checks passed, base → MoSV | MoSV better on | Correctness, base → MoSV | Answer tokens |
+|---|---|---|---|---|
+| **Teaching** | 0.58 → **0.97** | **98%** of prompts | 0.95 → 0.91 | 986 → 325 |
+| **Debugging** | 0.17 → **0.44** | **81%** | 0.98 → 0.95 | 828 → 544 |
+| **Story** | 0.73 → **0.81** | **62%** | 1.00 → 1.00 | 860 → 711 |
+| Explanation (not trained) | 0.34 → 0.34 | 50% | 0.70 → 0.81 | 736 → 739 |
+| Email (not trained) | 0.69 → 0.69 | 49% | 1.00 → 0.98 | 292 → 286 |
+| Engineering (not trained) | 0.77 → 0.71 | 39% | 0.69 → 0.79 | 785 → 765 |
+
+**Shorter answers, same speed** (one RX 9070 XT, llama.cpp, same 10 prompts, fixed seed):
+
+| | Base Gemma 4 12B | MoSV v6.0.1 | Change |
+|---|---|---|---|
+| Generation, llama-bench tg128 | 58.1 tok/s | 60.0 tok/s | +3% (within noise) |
+| Prompt reading, llama-bench pp512 | 1,973 tok/s | 1,975 tok/s | 0% |
+| Answer length | 783 tokens | 539 tokens | **-31%** |
+| Time per answer | 13.8 s | 9.6 s | **-31%** |
+
+![Speed summary](paper/figures_v6_0_1/4_speed_summary.png)
+
+Limits: judged by one model (Haiku); engineering prompts dip although not trained (use plain Gemma for coding);
+English only. Code `v6_0_1/`, write-up [paper/paper_v6_0_1.md](paper/paper_v6_0_1.md), what went wrong on the way
+(v6 RL gave no gain) [docs/V6_GEMMA.md](docs/V6_GEMMA.md), speed test [results/speed_v6_0_1/](results/speed_v6_0_1/README.md).
+
+## Earlier model: v4 on Qwen3-4B, one GGUF for stock llama.cpp and LM Studio (2026-11-25)
 
 `MoSV-Qwen3-4B-F16.gguf` (8.10 GB) is Qwen3-4B with the trained steering built in as real MoE layers of
 `hy_v3`, an architecture llama.cpp already has. The router is inside the model as per-token gates. No proxy, no
@@ -90,6 +137,12 @@ The experts are distilled to output the v3 vectors and the gates to give the rou
 
 | Path | Job |
 |---|---|
+| `v6_0_1/` | **Current model (Gemma 4 12B):** headroom gate, yes/no checks, supervised training, router, GGUF export |
+| `v6/` | Gemma RL attempt (no gain) and the shared expert code (`steer.py`), `verify.py` checks inside llama.cpp |
+| `release/MoSV-Gemma-4-12B-v6.0.1/` | Hugging Face model card of the current model |
+| `reports/speed_v6_0_1.py`, `results/speed_v6_0_1/` | Controlled speed test, base Gemma vs MoSV, with every answer and log |
+| `v5/` | Bonsai-4B 1-bit: RL straight into the GGUF layout |
+| *Below: the Qwen3-4B versions (v3, v4)* | |
 | `steering.py` | The vector bank and the layer hooks that add a vector |
 | `system.py` | Loads model + router + vectors; routed and fixed generation |
 | `model_profiles.py` | Per-model settings (0.6B and 4B): layers, paths, VRAM budgets |
