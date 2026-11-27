@@ -1,5 +1,5 @@
 TITLE:
-I taught a frozen Gemma 4 12B new behaviors with tiny per-token "steering experts" (36 MB). RL failed, plain supervised training worked, and I think per-token expert switching beats LoRA for this.
+Per-token steering experts: a LoRA alternative that switches per token (Gemma 4 12B)
 
 
 Hey all,
