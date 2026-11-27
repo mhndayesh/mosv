@@ -1,71 +1,90 @@
-I taught a frozen Gemma 4 12B new behaviors with tiny "steering experts" (36 MB). RL failed, plain supervised training worked. Here's what I learned.
+# I taught a frozen Gemma 4 12B new behaviors with tiny per-token "steering experts" (36 MB). RL failed, plain supervised training worked, and I think per-token expert switching beats LoRA for this.
 
 Hey all,
 
 I've been working on a side project called MoSV (Mixture of Steering Vectors) and wanted to share where it's at, including the part that failed.
 
-**Where the idea came from**
+## Where the idea came from
 
-I read "RL Post-Training in Diffusion Transformers Is Activation Steering" (Meral et al., arXiv:2611.26627). They show that for image/video diffusion models, most of what RL fine-tuning gains can be recovered with a small set of steering vectors added inside the frozen model. That made me wonder if the same works for text LLMs: maybe "post-training" is mostly nudging the model in a direction, and you don't need to touch the weights at all.
+I read "RL Post-Training in Diffusion Transformers Is Activation Steering" (Meral et al., arXiv:2611.26627). They show that for image and video diffusion models, most of what RL fine-tuning gains can be recovered with a small set of steering vectors added inside the frozen model. That made me wonder if the same works for text LLMs: maybe "post-training" is mostly nudging the model in a direction, and you don't need to touch the weights at all.
 
-**What I built**
+## What i built
 
-The base model stays frozen. I add tiny experts at three layers, one per topic. A router picks an expert per token, or "none", in which case the model answers exactly like normal. The whole thing is baked into one GGUF in a layout stock llama.cpp already supports, so it runs in plain llama.cpp and LM Studio with no custom code.
+The base model stays frozen. I add tiny experts at three layers, one per topic (debugging, teaching, story writing). A router picks an expert for every single token, or "none", in which case the model answers exactly like normal. The whole thing is baked into one GGUF in a mixture-of-experts layout that stock llama.cpp already supports, so it runs in plain llama.cpp and LM Studio with no custom code.
 
 The idea I'm testing: this teaches behavior, not knowledge. The model already knows things. What it often gets wrong is how it answers: writing a lesson plan for a teacher when you asked it to teach a kid, stating guesses as facts when debugging, opening every story with the weather.
 
-**It worked on small models first**
+## The key point: per-token expert switching vs LoRA
 
-On Qwen3-4B and a 1-bit Bonsai-4B I trained the experts with RL (sample several answers, a judge model scores them, reinforce the better ones). Both improved: Bonsai scored higher on 66% of 300 locked test prompts, with answers 4x shorter and no more looping.
+This is the part I think matters most, beyond my specific results.
 
-[image: 3_results_table.png]
+A LoRA is always on. It changes the model for every prompt and every token, whether that prompt is about the thing you trained or not. If you want three behaviors you either merge three LoRAs (and they interfere), or you swap adapters per request, which needs extra tooling and still applies one adapter to the whole answer.
 
-**Then it broke on a strong model**
+MoSV works the way a mixture-of-experts layer works. At each of the three layers, a small router looks at every token and picks one expert or none:
 
-On Gemma 4 12B, the same RL setup did nothing. Two full runs, no gain. So I stopped and measured why:
+- The behavior only turns on where it belongs. Everything else passes through the untouched base model.
+- It can switch mid-conversation, and even mid-answer, with nothing reloaded. In my earlier Qwen version I logged which expert fired on each token in one chat: a story turn used the story expert on 100% of its tokens, the next debugging turn 91% debugging, the next email turn 97% email.
+- Adding a behavior means adding one small expert, not retraining or merging everything.
+- It ships as a normal MoE GGUF, so any engine that runs MoE models runs it. No adapter loading, no proxy.
+
+I measured it inside llama.cpp on the shipped Gemma file. On the trained topics the experts change the model's next-token predictions a lot (the top token changes on 22-33% of positions). On untrained topics and everyday questions it stays close to the plain model (top token changed on 0-2% of positions).
+
+So I think this is a genuinely useful addition to the MoE idea: instead of experts that each hold part of the model's knowledge, you bolt small behavior experts onto a frozen model, and the router decides per token when each behavior applies. Same machinery MoE models already use, very different job.
+
+## It worked on small models first
+
+On Qwen3-4B and a 1-bit Bonsai-4B I trained the experts with RL (sample several answers, a judge model scores them, reinforce the better ones). Both improved. Qwen went from 2.89 to 3.61 on a blind judge score, and Bonsai scored higher on 66% of 300 locked test prompts, with answers 4x shorter and no more looping.
+
+![3_results_table.png](3_results_table.png)
+
+## Then it broke on a strong model
+
+On Gemma 4 12B the same RL setup did nothing. Two full runs, no gain. So I stopped and measured why:
 
 - There was almost no room. On my test, Gemma scored 3.38, Gemma told the rules directly scored 3.46, and the judge model itself scored 3.71.
 - The reward was noise. I had the judge rank the same 4 answers twice, and it picked the same winner 25.5% of the time. That's chance.
-- A strong model gives the same quality every time, so RL has nothing better to reinforce.
+- A strong model gives about the same quality every time, so RL has nothing better to reinforce.
 
-[image: 2_rl_reward_noise.png]
+![2_rl_reward_noise.png](2_rl_reward_noise.png)
 
-**The fix (way simpler, honestly)**
+## The fix (way simpler, honestly)
 
 1. Gate first. Before training, compare the model answering plainly with the model told the rules. Only train topics where being told clearly helps. That's also the ceiling.
+
 2. Yes/no checks instead of a 1-5 score. "Does the answer speak to the child directly?" "Does it separate what the bug report says from what's guessed?" Plus one correctness check that must not get worse. The judge gives the same answer twice 95-98% of the time.
-3. Tell, check, train. Have the model answer with the rules, check each answer, keep only the ones that pass and beat the plain answer, then train the experts on those with the plain prompt only. That's just normal supervised training, like a LoRA. No RL.
 
-Funny part: after all the RL work, what worked is basically "make good examples from the model itself, filter them, fine-tune the small parts."
+3. Tell, check, train. Have the model answer with the rules, check each answer, keep only the ones that pass and beat the plain answer, then train the experts on those using the plain prompt only. That's just normal supervised training, like training a LoRA. No RL.
 
-**Results on Gemma 4 12B**
+Funny part: after all the RL work, what worked is basically "make good examples from the model itself, filter them, fine-tune the small parts." The training is LoRA-simple; the per-token routing is what makes it different.
 
-Locked test, 300 prompts never used in training, no instructions given to the model:
+## Results on Gemma 4 12B
 
-[image: 1_gemma_results.png]
+Locked test, 300 prompts never used in training, no instructions given to the model, answered by the GGUF in llama.cpp:
 
-- Teaching: 0.58 to 0.97 of the behavior checks, better on 98% of prompts. Answers went from ~990 to ~325 tokens because it stopped writing lesson plans and started actually teaching the kid.
+![1_gemma_results.png](1_gemma_results.png)
+
+- Teaching: 0.58 to 0.97 of the behavior checks, better on 98% of prompts. Answers went from about 990 to about 325 tokens because it stopped writing lesson plans and started actually teaching the kid.
 - Debugging: 0.17 to 0.44, better on 81% of prompts.
 - Story: 0.73 to 0.81, better on 62% of prompts.
 
 The dashed line is the ceiling (the model told the rules). Teaching and story basically reach it without being told anything.
 
-**Why I think this is a genuinely good idea**
+## Why i think this is a good idea
 
+- Per token, not per model: each behavior turns on only where it belongs, which a LoRA can't do.
 - Tiny: 36 MB on top of a frozen 7 GB model.
 - Behavior, not knowledge: you're not overwriting what the model knows.
-- Per topic: each topic gets its own behavior and everything else is left alone. A normal LoRA changes the model for every prompt.
 - One file that runs anywhere llama.cpp runs.
 - It could replace a lot of long system prompts: tone, format and steps could live in an expert instead of 2,000 tokens of instructions.
 
-**Caveats**
+## Caveats
 
 - One judge (Claude Haiku), and 43 test prompts per topic.
 - Teaching got slightly less accurate (0.95 to 0.91 on the correctness check).
-- Engineering, which I did NOT train, got a bit worse (0.77 to 0.71). Probably some code tokens get routed to the debugging expert. That's the next thing to fix.
+- Engineering, which I did NOT train, got a bit worse (0.77 to 0.71). Probably some code tokens get routed to the debugging expert, so the router isn't perfect yet. That's the next thing to fix.
 - Done on a home setup with two RX 9070 XTs on Windows, which was its own adventure.
 
-Code, paper and all the numbers: github.com/mhndayesh/mosv
-Model: huggingface.co/mhndayesh/MoSV-Gemma-4-12B-v6.0.1
+Code, paper and all the numbers: [github.com/mhndayesh/mosv](https://github.com/mhndayesh/mosv)
+Model: [huggingface.co/mhndayesh/MoSV-Gemma-4-12B-v6.0.1](https://huggingface.co/mhndayesh/MoSV-Gemma-4-12B-v6.0.1)
 
 Happy to answer questions, and I'd love to hear if anyone has tried something similar on text models.
