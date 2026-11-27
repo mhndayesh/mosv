@@ -19,10 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
---------------------------------------------------------------------------------
-Third-party model weights are NOT covered by this license. The released GGUF files
-contain base-model weights under their own licenses, which still apply to those
-weights: Qwen3-4B-Instruct-2507 (Apache-2.0), Bonsai-4B (see its model card) and
-Gemma 4 12B (Apache-2.0). The MoSV experts, routers and steering vectors trained in
-this project are released under the MIT License above.
