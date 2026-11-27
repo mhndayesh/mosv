@@ -220,7 +220,7 @@ next to its files and **stops** if it differs. Rerun the stage with `--fresh`.
 | Distill vectors into experts | v4, Qwen3-4B | The v3 vectors and router copied into MoE layers of one GGUF | **3.61**, one file for stock llama.cpp and LM Studio |
 | RL straight into the GGUF experts | v5, Bonsai-4B 1-bit | The same RL, llama.cpp writes the answers from the live GGUF | Locked 300: 1.95 -> **2.42**, better on 66.2% of prompts, 1,212 -> 268 tokens, loops 30 -> 0 |
 | The same RL | v6, Gemma 4 12B | 7 topics | **No gain** (base 3.39, checkpoints 3.30 to 3.41) |
-| Tell, check, train | v6.0.1, Gemma 4 12B | Supervised on checked told answers | Gate passes 4 topics; small test: held-out loss 1.214 -> 1.081 in 6 steps. **Full run not done** |
+| Tell, check, train | v6.0.1, Gemma 4 12B | Supervised on checked told answers | Locked 300: teaching 0.58 -> **0.97**, debugging 0.17 -> **0.44**, story 0.73 -> **0.81** (behavior checks); trained better on 98% / 81% / 62% of prompts |
 
 ### 6.2 The RL method (v3, v5, v6) and the settings that worked on Bonsai
 

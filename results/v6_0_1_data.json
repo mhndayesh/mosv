@@ -1,60 +1,120 @@
 {
  "settings": {
-  "per_topic": 30,
-  "copies": 1,
-  "router_per_class": 12,
-  "fresh": false,
+  "per_topic": 300,
+  "copies": 2,
+  "router_per_class": 150,
+  "fresh": true,
+  "topics": [
+   "debugging",
+   "teaching",
+   "story"
+  ],
   "keep_min": 0.75,
   "failed_answers": 0
  },
  "trained": [
   "debugging",
-  "story",
-  "teaching"
+  "teaching",
+  "story"
  ],
  "router_texts": {
-  "none": 60,
-  "debugging": 44,
-  "story": 40,
-  "teaching": 57
+  "none": 750,
+  "debugging": 521,
+  "teaching": 572,
+  "story": 481
  },
  "topics": {
   "debugging": {
-   "prompts": 30,
-   "kept": 14,
+   "prompts": 300,
+   "kept": 221,
    "outcomes": {
-    "too few checks passed": 16,
-    "kept": 14
+    "too few checks passed": 78,
+    "kept": 221,
+    "not better than plain": 1
    },
-   "plain_behavior": 0.167,
-   "kept_behavior": 0.821,
-   "plain_tokens": 838,
-   "kept_tokens": 504
-  },
-  "story": {
-   "prompts": 30,
-   "kept": 10,
-   "outcomes": {
-    "kept": 10,
-    "not better than plain": 17,
-    "too few checks passed": 3
-   },
-   "plain_behavior": 0.658,
-   "kept_behavior": 0.875,
-   "plain_tokens": 900,
-   "kept_tokens": 565
+   "plain_behavior": 0.22,
+   "kept_behavior": 0.836,
+   "plain_tokens": 822,
+   "kept_tokens": 487,
+   "kept_variety": {
+    "speech_openings": 0.0,
+    "top_names": [
+     [
+      "Cause",
+      0.842
+     ],
+     [
+      "Likely",
+      0.724
+     ],
+     [
+      "Text",
+      0.367
+     ]
+    ]
+   }
   },
   "teaching": {
-   "prompts": 30,
-   "kept": 27,
+   "prompts": 300,
+   "kept": 272,
    "outcomes": {
-    "kept": 27,
-    "guard failed": 3
+    "kept": 272,
+    "not better than plain": 7,
+    "guard failed": 21
    },
-   "plain_behavior": 0.542,
-   "kept_behavior": 0.991,
-   "plain_tokens": 1012,
-   "kept_tokens": 291
+   "plain_behavior": 0.561,
+   "kept_behavior": 0.998,
+   "plain_tokens": 994,
+   "kept_tokens": 271,
+   "kept_variety": {
+    "speech_openings": 0.0,
+    "top_names": [
+     [
+      "Bible",
+      0.096
+     ],
+     [
+      "This",
+      0.081
+     ],
+     [
+      "Nigeria",
+      0.066
+     ]
+    ]
+   }
+  },
+  "story": {
+   "prompts": 300,
+   "kept": 181,
+   "outcomes": {
+    "kept": 181,
+    "not better than plain": 101,
+    "too few checks passed": 2,
+    "guard failed": 3,
+    "repeats an opening or a name": 13
+   },
+   "plain_behavior": 0.657,
+   "kept_behavior": 0.956,
+   "plain_tokens": 901,
+   "kept_tokens": 650,
+   "kept_variety": {
+    "speech_openings": 0.0,
+    "top_names": [
+     [
+      "Julian",
+      0.05
+     ],
+     [
+      "Thistle",
+      0.05
+     ],
+     [
+      "Vane",
+      0.05
+     ]
+    ]
+   }
   }
  }
 }

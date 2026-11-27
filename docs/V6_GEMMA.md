@@ -10,8 +10,9 @@ The reusable recipe, the data structure, the data rules and the training methods
   Haiku itself 3.71. There was almost nothing to win, and the training reward was noise.
 - v6.0.1 measures the room first, scores single behaviors with yes/no checks, and teaches by "tell, check, train"
   instead of trial and error.
-- Status of v6.0.1: every stage is written and has run end to end at small scale. The full run has not been done.
-  Section 5 says exactly what is measured and what is not.
+- Status of v6.0.1: **done and shipped** (2026-11-27). Three topics trained (debugging, teaching, story). On the
+  locked test the trained model passes more behavior checks on 98% / 81% / 62% of prompts. Section 5.6 has the
+  final result; the write-up is [paper/paper_v6_0_1.md](../paper/paper_v6_0_1.md).
 
 Words used below: **plain** = the user's prompt alone. **Told** = the same prompt with the topic's rules in a system
 message. **Guard** = a yes/no question about correctness that must not get worse.
@@ -176,20 +177,39 @@ The loss fell at every check and the strength grew in a straight line: 0.0143 af
 direction gives at most 0.018 and a random walk 0.007. In v6 the same number followed the random walk. This is a
 small test on 3 held-out answers: it shows the signal is real, not how good the final model will be.
 
-### 5.6 Not measured yet
+### 5.6 The full run (2026-11-27)
 
-- **The result of a full run.** How much of the told behavior the experts keep is unknown until it is done.
-- The 6-step checkpoint was built into a GGUF and tested on 4 prompts per topic (`evaluate.py`, report in
-  `results/v6_0_1_eval_dev_smoke_steer_0006.json`). That proves the stage runs; 4 prompts say nothing about quality.
+Topics trained: debugging, teaching, story (clear passes in both 60-prompt gate runs; explanation and engineering
+flipped between runs and were left out). Run `gemma_v601`:
 
-Fill this in after the full run (locked test, 300 prompts, plain prompts only):
+- **Data:** 300 training prompts per topic, 2 told answers each; kept 221 / 272 / 181 (debugging / teaching / story).
+- **Training:** 611 answers, 63 held out, 117 steps. Held-out loss 1.218 (plain) -> 0.642, below the told level
+  0.684. Router held-out accuracy 83% / 97% / 97% at layers 12 / 24 / 36.
+- **Checkpoint choice (dev, 60 prompts per topic):** step 100, best or tied best on all three topics
+  (teaching 0.58 -> 0.99, story 0.68 -> 0.82, debugging 0.16 -> 0.40).
 
-| Topic | Behavior, base | Behavior, trained | Guard, base | Guard, trained | Trained wins |
-|---|---|---|---|---|---|
-| (each trained topic) | | | | | |
+**Locked test, checkpoint 100** (300 prompts, plain prompts, answered by the built GGUF in llama.cpp, the baseline's
+settings; `results/v6_0_1_eval_test_gemma_v601_steer_0100.json`):
 
-Expect the old overall 1-5 score to move only a little even if this works (section 2, issue 1). Success is
-measured on the behavior checks, with the guard and the untrained topics unchanged.
+| Topic | Behavior, base -> trained | Trained better on | Guard, base -> trained | Tokens, base -> trained |
+|---|---|---|---|---|
+| **Teaching** | 0.58 -> **0.97** | **98%** | 0.95 -> 0.91 | 986 -> 325 |
+| **Debugging** | 0.17 -> **0.44** | **81%** | 0.98 -> 0.95 | 828 -> 544 |
+| **Story** | 0.73 -> **0.81** | **62%** | 1.00 -> 1.00 | 860 -> 711 |
+| Explanation (not trained) | 0.34 -> 0.34 | 50% | 0.70 -> 0.81 | 736 -> 739 |
+| Email (not trained) | 0.69 -> 0.69 | 49% | 1.00 -> 0.98 | 292 -> 286 |
+| Engineering (not trained) | 0.77 -> 0.71 | 39% | 0.69 -> 0.79 | 785 -> 765 |
+
+- Teaching reaches its ceiling (told: 0.99); story is close (0.83); debugging more than doubles but stays below
+  its ceiling (0.58).
+- Correctness cost on teaching: 0.95 -> 0.91.
+- **Engineering, not trained, lost ground** on the locked test (0.77 -> 0.71, 39% wins), though it gained on dev
+  (0.75 -> 0.79). Likely cause: engineering tokens routed to the debugging expert. Fix to try: fit the router with
+  engineering prompts as their own group of "none" texts.
+- The old overall 1-5 score was not rerun on the trained model.
+- **Checked inside the GGUF** (`v6/verify.py`): in llama.cpp the experts change next-token log-probabilities by
+  1.6-2.0 on trained topics and 0.13-0.21 on untrained topics and everyday prompts (top token changed 22-33% vs
+  0-2%); PyTorch and llama.cpp agree at 0.89. Chat demo: `results/v6_0_1_demo.md`.
 
 ## 6. v6.0.1: the code
 
@@ -239,7 +259,7 @@ Reused, not copied: the server start and streaming request (`reports/answer_v5.p
 
 ## 8. Limits and open items
 
-- The full v6.0.1 run is not done; section 5.6 is empty.
+- Engineering leaks into an expert on the locked test (section 5.6).
 - The prompts were not replaced. The behaviors were chosen to fit them (honesty for bug reports without code,
   placeholders for emails without facts). Better prompt sources remain an option.
 - Haiku is the checker, the reference writer and the old scorer. A second judge model would be a stronger check.

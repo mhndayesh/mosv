@@ -1,0 +1,82 @@
+{
+ "run": "gemma_v601",
+ "checkpoint": "steer_0100.pt",
+ "update": 100,
+ "prompts": 24,
+ "positions": 1143,
+ "compared_values": 19847,
+ "floor_mean_abs_logprob_diff_base": 1.4349,
+ "top1_agree_base": 0.9011,
+ "top1_agree_steered": 0.8836,
+ "effect_mean_abs_llama": 0.6881,
+ "effect_mean_abs_torch": 0.7111,
+ "effect_agreement_corr": 0.8925,
+ "w2_per_dim": {
+  "12": 0.0417,
+  "24": 0.1469,
+  "36": 0.1875
+ },
+ "routed_torch": {
+  "12": {
+   "none": 0.4412,
+   "debugging": 0.2843,
+   "story": 0.1287,
+   "teaching": 0.1458
+  },
+  "24": {
+   "none": 0.5733,
+   "debugging": 0.2201,
+   "story": 0.1089,
+   "teaching": 0.0978
+  },
+  "36": {
+   "none": 0.5736,
+   "debugging": 0.2223,
+   "story": 0.1225,
+   "teaching": 0.0817
+  }
+ },
+ "inside_llama_by_topic": {
+  "story": {
+   "mean_abs_logprob_change": 1.6323,
+   "top_token_changed": 0.278
+  },
+  "teaching": {
+   "mean_abs_logprob_change": 1.9743,
+   "top_token_changed": 0.215
+  },
+  "debugging": {
+   "mean_abs_logprob_change": 1.7892,
+   "top_token_changed": 0.326
+  },
+  "math_solving": {
+   "mean_abs_logprob_change": 0.1261,
+   "top_token_changed": 0.0
+  },
+  "explanation": {
+   "mean_abs_logprob_change": 0.2022,
+   "top_token_changed": 0.021
+  },
+  "professional_email": {
+   "mean_abs_logprob_change": 0.176,
+   "top_token_changed": 0.007
+  },
+  "engineering": {
+   "mean_abs_logprob_change": 0.1627,
+   "top_token_changed": 0.0
+  },
+  "none (everyday)": {
+   "mean_abs_logprob_change": 0.2143,
+   "top_token_changed": 0.0
+  }
+ },
+ "stop_token_returned": {
+  "stop_type": "eos",
+  "last_tokens": [
+   "hello",
+   "<turn|>"
+  ],
+  "eos": "<eos>",
+  "n": 2
+ }
+}

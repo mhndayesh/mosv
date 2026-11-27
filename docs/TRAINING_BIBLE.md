@@ -224,7 +224,8 @@ Progress without a judge, on held-out answers:
 - `gap_closed = (base_ce - val_ce) / (base_ce - teacher_ce)`: 0 = nothing learned, 1 = behaves as if told.
 
 Measured so far: in a 6-step test the held-out loss fell at every check (1.214 -> 1.081, told level 0.589) and the
-expert strength grew in a straight line. **A full run has not been done.**
+expert strength grew in a straight line. Full run (674 kept answers, 117 steps): on the locked test, teaching
+0.58 -> 0.97, debugging 0.17 -> 0.44, story 0.73 -> 0.81 (behavior checks passed).
 
 ---
 
@@ -336,8 +337,9 @@ Throughput on Gemma 4 12B with both cards (13 + 16 slots, 3,072 tokens per slot)
 | RL with a 4-answer ranking judge fails on a strong, consistent model | **Proven**: Gemma 4 12B, two runs, no gain |
 | Yes/no single-answer checks repeat | **Proven**: 95-98% |
 | The gate finds where a strong model has room | **Proven** on dev: debugging, teaching, explanation, story pass |
-| Supervised training on checked told answers moves the experts in a steady direction | **Small test only**: 6 steps, 3 held-out answers |
-| The trained experts keep the told behavior on the locked test | **Not measured** |
+| Supervised training on checked told answers moves the experts in a steady direction | **Proven**: held-out loss 1.218 -> 0.642 in 117 steps, falling at every check |
+| The trained experts keep the told behavior on the locked test | **Proven** for teaching (0.97 vs told 0.99) and story (0.81 vs 0.83); **partly** for debugging (0.44 vs 0.58) |
+| Untrained topics stay unchanged | **Mostly**: explanation and email unchanged; engineering lost ground on the locked test (0.77 -> 0.71) |
 | Story rules without a forced opening keep variety | **Measured** (60 dev prompts): told stories open with speech 0% of the time (old kept set 100%); most repeated name 8% (Elias was 60%); story still passes the gate, 0.66 -> 0.83 |
 | Gate verdicts are stable near the thresholds | **No**: between two 60-prompt runs with unchanged rules, explanation flipped from train to skip (guard drop 5 -> 12 points) and engineering from skip to train (+14 -> +16) |
 | RL as a polish after tell-check-train | **Not built** |

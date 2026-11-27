@@ -9,7 +9,10 @@ ways: llama.cpp base, llama.cpp with experts, PyTorch base (w2 = 0), PyTorch wit
   effect     mean |logprob change| the experts cause, in each engine
   agreement  correlation of that change between the engines (near 1 = same experts; near 0 = the learner trains a
              different function than the one llama.cpp samples from)
-Also prints whether llama.cpp returns the stop token with an answer. Saves checkpoints/v6/<run>/verify.json.
+  inside     per prompt topic, plus everyday "none" prompts: how much the experts change llama.cpp's own next-token
+             probabilities, and how often they change its top token. Trained topics should move; "none" should not.
+             This is measured inside the GGUF, with llama.cpp's router and experts, no PyTorch involved.
+Also prints whether llama.cpp returns the stop token with an answer. Saves checkpoints/<version>/<run>/verify.json.
 """
 
 from __future__ import annotations
@@ -85,7 +88,9 @@ def main(argv=None):
     saved = torch.load(folder / args.checkpoint, weights_only=False)
     classes = saved["steer"]["classes"]  # read from the checkpoint: v6 has 7 topics, v6.0.1 only the trained ones
     tok = AutoTokenizer.from_pretrained(HF)
-    rows = [r for t in TOPICS for r in read(ROOT / "data_review" / "v6" / t / "dev.jsonl")[: args.per_topic]]
+    rows = [{**r, "topic": t} for t in TOPICS for r in read(ROOT / "data_review" / "v6" / t / "dev.jsonl")[: args.per_topic]]
+    everyday = [r for r in read(ROOT / "data_review" / "router_v2" / "prompts.jsonl") if r["label"] == "none" and r["split"] == "val"]
+    rows += [{"prompt": r["text"], "topic": "none (everyday)"} for r in everyday[: args.per_topic]]  # should stay untouched
     prompts = prompt_ids(tok, [r["prompt"] for r in rows])
 
     cpu = GemmaSteer(classes, saved["steer"]["gate"][LAYERS[0]].shape[1], LAYERS, "cpu")
@@ -133,9 +138,15 @@ def main(argv=None):
     routed = steer.routed_share()
 
     floor, d_llama, d_pt, top1_base, top1_steer = [], [], [], [], []
+    inside = {}  # topic -> [sum of |logprob change| in llama.cpp, values, positions, positions whose top token changed]
     for i, s in enumerate(seqs):
         for t in range(len(s)):
             lb, ls = llama_base[i][t], llama_steer[i][t]
+            acc = inside.setdefault(rows[i]["topic"], [0.0, 0, 0, 0])
+            acc[0] += sum(abs(ls[k] - lb[k]) for k in lb.keys() & ls.keys())
+            acc[1] += len(lb.keys() & ls.keys())
+            acc[2] += 1
+            acc[3] += max(lb, key=lb.get) != max(ls, key=ls.get)
             floor += [abs(float(pt_base[i][t, k]) - v) for k, v in lb.items()]
             top1_base.append(int(pt_base[i][t].argmax()) == max(lb, key=lb.get))
             top1_steer.append(int(pt_steer[i][t].argmax()) == max(ls, key=ls.get))
@@ -152,6 +163,8 @@ def main(argv=None):
               "effect_agreement_corr": round(float(torch.corrcoef(torch.stack([a, b]))[0, 1]), 4),
               "w2_per_dim": {l: round(float(w.norm()) / w.numel() ** 0.5, 4) for l, w in trained.items()},
               "routed_torch": routed,
+              "inside_llama_by_topic": {t: {"mean_abs_logprob_change": round(v[0] / max(v[1], 1), 4),
+                                            "top_token_changed": round(v[3] / max(v[2], 1), 3)} for t, v in inside.items()},
               "stop_token_returned": {"stop_type": short.get("stop_type"), "last_tokens": tok.convert_ids_to_tokens(short["tokens"][-3:]),
                                       "eos": tok.eos_token, "n": len(short["tokens"])}}
     (folder / "verify.json").write_text(json.dumps(report, indent=1), encoding="utf-8")

@@ -22,7 +22,7 @@ This project adapts it to a text LLM, with one vector per topic and a router (se
 | **Shipped model** | **v4**: one GGUF (`hy_v3` MoE), stock llama.cpp and LM Studio, blind average 3.61 (normal 2.89). See Result 4 |
 | v3 | Control vectors + proxy, folder `v3/` (tag `v3-control-vectors`). Replaced by v4 as the main version; its vectors and router are v4's teacher |
 | **v5 (2026-11-26, branch `bonsai`)** | Bonsai-4B 1-bit, expert trained by RL straight into the GGUF (llama.cpp sampling). Engineering only so far: locked test 66.2% of prompts better than base, 2.42 vs 1.95, answers 268 vs 1,212 tokens. See Result 5 and [V5_BONSAI.md](V5_BONSAI.md) |
-| **v6 / v6.0.1 (2026-11-26, branch `bonsai`)** | Gemma 4 12B. v6.0 (the v5 RL method) gave no gain: the test had no room and the reward was noise. v6.0.1 replaces it with a headroom gate, yes/no behavior checks and supervised "tell, check, train". Code written and run end to end at small scale; full run not done. See Result 6 and [V6_GEMMA.md](V6_GEMMA.md) |
+| **v6 / v6.0.1 (2026-11-26, branch `bonsai`)** | Gemma 4 12B. v6.0 (the v5 RL method) gave no gain: the test had no room and the reward was noise. v6.0.1 replaces it with a headroom gate, yes/no behavior checks and supervised "tell, check, train". **Shipped 2026-11-27:** debugging, teaching, story trained; locked test: trained better on 81% / 98% / 62% of prompts. See Result 6, [V6_GEMMA.md](V6_GEMMA.md) and [paper_v6_0_1.md](../paper/paper_v6_0_1.md) |
 
 ## Result 1: training scores (Haiku, 256-token answers)
 
@@ -124,7 +124,20 @@ supervised training on told answers that passed the checks. Measured so far, on 
   email 0.65 -> 0.73 are skipped.
 - Small test of the trainer (24 answers, 6 steps): held-out loss 1.214 -> 1.081, falling at every check.
 
-The full run (build data, train, locked test) has not been done. Everything else: [V6_GEMMA.md](V6_GEMMA.md).
+**Final (2026-11-27), checkpoint 100 of run `gemma_v601`, locked test (300 prompts, plain prompts, the GGUF in
+llama.cpp):**
+
+| Topic | Behavior, base -> trained | Trained better on | Guard, base -> trained | Tokens, base -> trained |
+|---|---|---|---|---|
+| **Teaching** | 0.58 -> **0.97** | **98%** | 0.95 -> 0.91 | 986 -> 325 |
+| **Debugging** | 0.17 -> **0.44** | **81%** | 0.98 -> 0.95 | 828 -> 544 |
+| **Story** | 0.73 -> **0.81** | **62%** | 1.00 -> 1.00 | 860 -> 711 |
+| Explanation (not trained) | 0.34 -> 0.34 | 50% | 0.70 -> 0.81 | 736 -> 739 |
+| Email (not trained) | 0.69 -> 0.69 | 49% | 1.00 -> 0.98 | 292 -> 286 |
+| Engineering (not trained) | 0.77 -> 0.71 | 39% | 0.69 -> 0.79 | 785 -> 765 |
+
+Shipped as `MoSV-Gemma-4-12B-v6.0.1-Q4_K_M.gguf` (Q4_K_M base + 36 MB). Everything else: [V6_GEMMA.md](V6_GEMMA.md),
+[paper_v6_0_1.md](../paper/paper_v6_0_1.md).
 
 ## Open items
 
