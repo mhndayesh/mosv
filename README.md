@@ -223,3 +223,7 @@ Tests: `python -m pytest test_v3.py`. Tagged state: `v3-control-vectors`.
 - Prefer the second card (no display). Windows gives WSL only about 10-13 GB of the display card, and anything
   over that spills into system RAM.
 - Keep the test's step size at 4,096-8,192 tokens and CUDA graphs on (no `--eager`).
+
+## License
+
+**Code, MoSV experts, routers and steering vectors: MIT** (free to use, change and sell, keep the notice). Released GGUF files also contains the base model's weights, which stay under their own licenses (Qwen3 and Gemma 4: Apache-2.0); that license also allows commercial use. See [LICENSE](LICENSE).

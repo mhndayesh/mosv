@@ -80,4 +80,6 @@ each pair judged twice with the order swapped.
 Inspired by Meral et al., "RL Post-Training in Diffusion Transformers Is Activation Steering"
 ([arXiv:2611.26627](https://arxiv.org/abs/2611.26627)), adapted from diffusion models to a text LLM with one vector
 per topic and a router. Base model: [Qwen/Qwen3-4B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507)
-(Apache-2.0). This release: Apache-2.0.
+(Apache-2.0).
+
+**Code, MoSV experts, routers and steering vectors: MIT** (free to use, change and sell, keep the notice). The GGUF also contains the base model's weights, which stay under Qwen's Apache-2.0; that license also allows commercial use.

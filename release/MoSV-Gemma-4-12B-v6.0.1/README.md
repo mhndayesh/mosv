@@ -113,7 +113,7 @@ An earlier attempt with RL (a judge ranking sampled answers) gave no gain on thi
 
 ## License
 
-Apache 2.0, the same as Gemma 4. Built on [google/gemma-4-12B-it](https://huggingface.co/google/gemma-4-12B-it).
+**Code, MoSV experts, routers and steering vectors: MIT** (free to use, change and sell, keep the notice). The GGUF also contains the base model's weights, which stay under Gemma 4's Apache 2.0; that license also allows commercial use. Built on [google/gemma-4-12B-it](https://huggingface.co/google/gemma-4-12B-it).
 
 ## Credit
 
