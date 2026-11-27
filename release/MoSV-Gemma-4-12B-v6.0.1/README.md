@@ -63,7 +63,7 @@ same 10 prompts, recommended sampling, fixed seed, no prompt cache) shows that t
 | One RX 9070 XT | Base Gemma 4 12B | MoSV v6.0.1 | Change |
 |---|---|---|---|
 | Generation, llama-bench tg128 | 58.1 tok/s | 60.0 tok/s | +3% (within noise) |
-| Prompt reading, llama-bench pp512 | 1,973 tok/s | 1,976 tok/s | 0% |
+| Prompt reading, llama-bench pp512 | 1,973 tok/s | 1,975 tok/s | 0% |
 | Answer length (10 prompts) | 783 tokens | 539 tokens | **-31%** |
 | Time per answer | 13.8 s | 9.6 s | **-31%** |
 

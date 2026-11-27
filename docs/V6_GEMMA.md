@@ -220,7 +220,7 @@ logs); images by `reports/speed_chart_v6_0_1.py`.
   recommended sampling with every sampler explicit, seed 7, thinking off, no prompt cache, warm-up not counted. Two
   cards (layer split), then one card. Fixed-length runs at 512 tokens in the order base, MoSV, MoSV, base;
   llama-bench pp512/tg128 x5.
-- **Same speed:** one card, llama-bench generation 58.1 (base) vs 60.0 (MoSV) tok/s, prompt reading 1,973 vs 1,976;
+- **Same speed:** one card, llama-bench generation 58.1 (base) vs 60.0 (MoSV) tok/s, prompt reading 1,973 vs 1,975;
   two cards 53.1 vs 53.4 and 1,974 vs 1,935.
 - **Shorter answers:** 783 -> 539 tokens (-31%) on one card, 763 -> 557 (-27%) on two; locked test 748 -> 561 (-25%,
   teaching -67%, debugging -34%, story -17%, untrained topics within 3%).

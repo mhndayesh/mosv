@@ -90,6 +90,23 @@ def per_prompt(data, setups):
     return rows + [avg]
 
 
+def headline(data):
+    """The short one-card table: speed the same, answers shorter and sooner."""
+    req, bench = data["requests"], data["bench"]
+    b = {(x["model"], x["test"]): x["tps"] for x in bench if x["setup"] == "single"}
+    nat = {m: [x for x in req if x["setup"] == "single" and x["model"] == m and x["mode"] == "natural"] for m in NAMES}
+    tok = {m: statistics.mean(x["gen_tokens"] for x in nat[m]) for m in NAMES}
+    sec = {m: statistics.mean(x["wall_s"] for x in nat[m]) for m in NAMES}
+    return [["One RX 9070 XT", "Base Gemma 4 12B", "MoSV v6.0.1", "Change"],
+            ["Generation speed (llama-bench)", f"{b['base', 'tg128']:.1f} tok/s", f"{b['mosv', 'tg128']:.1f} tok/s",
+             "same (within noise)"],
+            ["Prompt reading (llama-bench)", f"{b['base', 'pp512']:,.0f} tok/s", f"{b['mosv', 'pp512']:,.0f} tok/s", "same"],
+            ["Answer length (10 prompts)", f"{tok['base']:.0f} tokens", f"{tok['mosv']:.0f} tokens",
+             f"{100 * (1 - tok['mosv'] / tok['base']):.0f}% shorter"],
+            ["Time per answer", f"{sec['base']:.1f} s", f"{sec['mosv']:.1f} s",
+             f"{100 * (1 - sec['mosv'] / sec['base']):.0f}% sooner"]]
+
+
 def locked_lengths():
     """Answer length on the 300-prompt locked test (results/v6_0_1_eval_test_*), the larger sample."""
     test = json.loads((OUT.parent / "v6_0_1_eval_test_gemma_v601_steer_0100.json").read_text(encoding="utf-8"))
@@ -118,6 +135,8 @@ def main():
     draw(rows, "Speed: base Gemma 4 12B vs MoSV v6.0.1", note, OUT / "speed_summary.png", diff_rows)
     pp = per_prompt(data, setups)
     draw(pp, "Answer length and time per prompt (natural answers)", note, OUT / "speed_per_prompt.png", [len(pp) - 1])
+    if "single" in setups:
+        draw(headline(data), "MoSV v6.0.1: same speed, shorter answers", note, OUT / "speed_one_card.png", [3, 4])
     lt = locked_lengths()
     draw(lt, "Answer length on the locked test (prompts never used in training)",
          "Plain prompts, no instructions, answered by the shipped GGUF in llama.cpp with Gemma's recommended sampling; "
