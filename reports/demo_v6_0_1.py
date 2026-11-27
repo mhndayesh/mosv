@@ -31,10 +31,14 @@ PROMPTS = [  # (what it tests, prompt): written by hand for this demo
 ]
 
 
-def start(model: Path, card: str, port: int) -> subprocess.Popen:
-    cmd = [SERVER, "-m", str(model), "-dev", card, "-ngl", "99", "--port", str(port), "-fa", "on", "-c", "8192",
-           "-np", "1", "--jinja", "--no-webui", "-ctk", "q8_0", "-ctv", "q8_0"]
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+SERVER_FLAGS = ["-ngl", "99", "-sm", "layer", "-fa", "on", "-c", "8192", "-np", "1", "--jinja", "--no-webui", "-ctk", "q8_0", "-ctv", "q8_0"]
+
+
+def start(model: Path, card: str, port: int, log: Path | None = None) -> subprocess.Popen:
+    """Start llama-server; with `log`, its stdout and stderr go to that file (kept as a reference)."""
+    cmd = [SERVER, "-m", str(model), "-dev", card, "--port", str(port), *SERVER_FLAGS]
+    out = open(log, "w", encoding="utf-8") if log else subprocess.DEVNULL
+    proc = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT if log else subprocess.DEVNULL)
     for _ in range(600):
         try:
             urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1)

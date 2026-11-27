@@ -12,7 +12,8 @@ Versions in this repo:
   behavior checks, and supervised training on checked answers. **Shipped:** `MoSV-Gemma-4-12B-v6.0.1` with three
   trained topics. On 300 locked test prompts the trained model passes more behavior checks than base on 98% of
   teaching, 81% of debugging and 62% of story prompts (teaching 0.58 -> 0.97, debugging 0.17 -> 0.44, story
-  0.73 -> 0.81). Code `v6_0_1/`, write-up [paper/paper_v6_0_1.md](paper/paper_v6_0_1.md), what went wrong and why:
+  0.73 -> 0.81). Answers are 25% shorter at the same token speed (llama-bench 60.0 vs 58.1 tok/s on one card),
+  so a full answer arrives about 31% sooner ([results/speed_v6_0_1/](results/speed_v6_0_1/README.md)). Code `v6_0_1/`, write-up [paper/paper_v6_0_1.md](paper/paper_v6_0_1.md), what went wrong and why:
   [docs/V6_GEMMA.md](docs/V6_GEMMA.md).
 - **v5 (branch `bonsai`), MoSV on Bonsai-4B 1-bit:** the gated expert is trained by RL straight into the shipped
   GGUF layout, with llama.cpp writing the training answers. Engineering done: on 300 locked test prompts the trained

@@ -54,6 +54,27 @@ and a correctness check.
 The dashed line is the **ceiling**: plain Gemma *told* the rules in a system prompt. Teaching and story reach it
 without any instructions.
 
+## Shorter answers, same speed
+
+On the locked test, answers are **25% shorter** overall (748 → 561 tokens; teaching 986 → 325), and untrained
+topics keep their length. A controlled speed test in llama.cpp (same build and flags, one model at a time, the
+same 10 prompts, recommended sampling, fixed seed, no prompt cache) shows that the experts cost no speed:
+
+| One RX 9070 XT | Base Gemma 4 12B | MoSV v6.0.1 | Change |
+|---|---|---|---|
+| Generation, llama-bench tg128 | 58.1 tok/s | 60.0 tok/s | +3% (within noise) |
+| Prompt reading, llama-bench pp512 | 1,973 tok/s | 1,976 tok/s | 0% |
+| Answer length (10 prompts) | 783 tokens | 539 tokens | **-31%** |
+| Time per answer | 13.8 s | 9.6 s | **-31%** |
+
+![Speed summary](4_speed_summary.png)
+
+![Answer length on the locked test](5_answer_length_locked_test.png)
+
+On two cards (layer split), generation runs at 53.4 vs 53.1 tok/s and answers arrive 23% sooner. No answer was
+cut off (0 of 40 reached the limit). Full tables, every answer and raw logs:
+[results/speed_v6_0_1](https://github.com/mhndayesh/mosv/tree/main/results/speed_v6_0_1).
+
 ## Checked inside the GGUF
 
 Measured inside llama.cpp on the shipped GGUF (`v6/verify.py`, 3 dev prompts per topic + 3 everyday prompts,

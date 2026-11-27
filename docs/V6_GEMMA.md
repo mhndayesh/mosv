@@ -211,6 +211,27 @@ settings; `results/v6_0_1_eval_test_gemma_v601_steer_0100.json`):
   1.6-2.0 on trained topics and 0.13-0.21 on untrained topics and everyday prompts (top token changed 22-33% vs
   0-2%); PyTorch and llama.cpp agree at 0.89. Chat demo: `results/v6_0_1_demo.md`.
 
+### 5.7 Speed and answer length (2026-11-27)
+
+`reports/speed_v6_0_1.py`, results in `results/speed_v6_0_1/` (tables, every request, every answer, raw llama.cpp
+logs); images by `reports/speed_chart_v6_0_1.py`.
+
+- **Controls:** the same llama.cpp build and flags, one model at a time, the same 10 hand-written prompts, Gemma's
+  recommended sampling with every sampler explicit, seed 7, thinking off, no prompt cache, warm-up not counted. Two
+  cards (layer split), then one card. Fixed-length runs at 512 tokens in the order base, MoSV, MoSV, base;
+  llama-bench pp512/tg128 x5.
+- **Same speed:** one card, llama-bench generation 58.1 (base) vs 60.0 (MoSV) tok/s, prompt reading 1,973 vs 1,976;
+  two cards 53.1 vs 53.4 and 1,974 vs 1,935.
+- **Shorter answers:** 783 -> 539 tokens (-31%) on one card, 763 -> 557 (-27%) on two; locked test 748 -> 561 (-25%,
+  teaching -67%, debugging -34%, story -17%, untrained topics within 3%).
+- **Faster answers:** 13.8 -> 9.6 s per answer on one card (-31%), 16.4 -> 12.7 s on two (-23%).
+- **Nothing cut off:** 0 of 40 natural answers reached the 2,048-token limit (longest 1,060).
+- **Lesson:** the first run was thrown away because LM Studio had a model loaded on the same GPUs, and llama.cpp's
+  Vulkan "free memory" figure did not show it. The script now reads Windows' GPU memory counters before each load.
+
+![Speed summary](../paper/figures_v6_0_1/4_speed_summary.png)
+![Answer length on the locked test](../paper/figures_v6_0_1/5_answer_length_locked_test.png)
+
 ## 6. v6.0.1: the code
 
 Run every stage from the repo root in the `ai-training-rocm-windows` venv, with the cards free. Windows only.

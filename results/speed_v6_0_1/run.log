@@ -1,0 +1,133 @@
+VRAM ok: need ~6395 MiB per card, free {'Vulkan0': 13262, 'Vulkan1': 13262}
+dual   base_1 fixed   #0 teaching    gen  512 tok   45.1 tok/s | prompt   166.5 tok/s | wall   11.5s
+dual   base_1 fixed   #1 teaching    gen  512 tok   52.5 tok/s | prompt   242.9 tok/s | wall    9.9s
+dual   base_1 fixed   #2 debugging   gen  512 tok   51.2 tok/s | prompt   520.2 tok/s | wall   10.2s
+dual   base_1 fixed   #3 debugging   gen  512 tok   50.0 tok/s | prompt   346.3 tok/s | wall   10.5s
+dual   base_1 fixed   #4 story       gen  512 tok   47.1 tok/s | prompt   257.9 tok/s | wall   11.1s
+dual   base_1 fixed   #5 story       gen  512 tok   49.0 tok/s | prompt   274.1 tok/s | wall   10.6s
+dual   base_1 fixed   #6 everyday    gen  512 tok   50.3 tok/s | prompt   268.8 tok/s | wall   10.3s
+dual   base_1 fixed   #7 explanation gen  512 tok   50.8 tok/s | prompt   175.4 tok/s | wall   10.3s
+dual   base_1 fixed   #8 engineering gen  512 tok   49.6 tok/s | prompt   143.0 tok/s | wall   10.6s
+dual   base_1 fixed   #9 email       gen  512 tok   49.7 tok/s | prompt   251.3 tok/s | wall   10.5s
+dual   base_1 natural #0 teaching    gen  940 tok   47.3 tok/s | prompt   217.6 tok/s | wall   20.0s
+dual   base_1 natural #1 teaching    gen  925 tok   49.4 tok/s | prompt   233.6 tok/s | wall   18.9s
+dual   base_1 natural #2 debugging   gen  996 tok   49.0 tok/s | prompt   516.3 tok/s | wall   20.5s
+dual   base_1 natural #3 debugging   gen  873 tok   49.0 tok/s | prompt   436.9 tok/s | wall   18.0s
+dual   base_1 natural #4 story       gen  740 tok   48.6 tok/s | prompt   216.0 tok/s | wall   15.6s
+dual   base_1 natural #5 story       gen 1000 tok   48.5 tok/s | prompt   249.4 tok/s | wall   20.8s
+dual   base_1 natural #6 everyday    gen  670 tok   45.4 tok/s | prompt   213.9 tok/s | wall   15.0s
+dual   base_1 natural #7 explanation gen  448 tok   46.5 tok/s | prompt   144.4 tok/s | wall    9.9s
+dual   base_1 natural #8 engineering gen  699 tok   40.0 tok/s | prompt   198.0 tok/s | wall   17.6s
+dual   base_1 natural #9 email       gen  343 tok   45.0 tok/s | prompt   179.4 tok/s | wall    8.0s
+VRAM ok: need ~6413 MiB per card, free {'Vulkan0': 13428, 'Vulkan1': 13428}
+dual   mosv_1 fixed   #0 teaching    gen  512 tok   44.4 tok/s | prompt   158.6 tok/s | wall   11.7s
+dual   mosv_1 fixed   #1 teaching    gen  512 tok   45.3 tok/s | prompt   177.2 tok/s | wall   11.5s
+dual   mosv_1 fixed   #2 debugging   gen  512 tok   48.3 tok/s | prompt   428.3 tok/s | wall   10.8s
+dual   mosv_1 fixed   #3 debugging   gen  512 tok   50.1 tok/s | prompt   357.1 tok/s | wall   10.5s
+dual   mosv_1 fixed   #4 story       gen  512 tok   48.2 tok/s | prompt   220.0 tok/s | wall   10.9s
+dual   mosv_1 fixed   #5 story       gen  512 tok   40.2 tok/s | prompt   250.0 tok/s | wall   13.0s
+dual   mosv_1 fixed   #6 everyday    gen  512 tok   43.6 tok/s | prompt   148.5 tok/s | wall   12.1s
+dual   mosv_1 fixed   #7 explanation gen  512 tok   43.2 tok/s | prompt   116.8 tok/s | wall   12.1s
+dual   mosv_1 fixed   #8 engineering gen  512 tok   41.5 tok/s | prompt   174.8 tok/s | wall   12.6s
+dual   mosv_1 fixed   #9 email       gen  512 tok   40.8 tok/s | prompt   171.3 tok/s | wall   12.9s
+dual   mosv_1 natural #0 teaching    gen  268 tok   43.3 tok/s | prompt   160.5 tok/s | wall    6.4s
+dual   mosv_1 natural #1 teaching    gen  502 tok   44.4 tok/s | prompt   179.3 tok/s | wall   11.5s
+dual   mosv_1 natural #2 debugging   gen  783 tok   44.6 tok/s | prompt   354.9 tok/s | wall   17.8s
+dual   mosv_1 natural #3 debugging   gen  903 tok   44.6 tok/s | prompt   319.7 tok/s | wall   20.6s
+dual   mosv_1 natural #4 story       gen  468 tok   45.0 tok/s | prompt   195.0 tok/s | wall   10.7s
+dual   mosv_1 natural #5 story       gen  623 tok   45.7 tok/s | prompt   202.1 tok/s | wall   13.8s
+dual   mosv_1 natural #6 everyday    gen  619 tok   45.2 tok/s | prompt   190.1 tok/s | wall   14.0s
+dual   mosv_1 natural #7 explanation gen  584 tok   45.4 tok/s | prompt   137.1 tok/s | wall   13.1s
+dual   mosv_1 natural #8 engineering gen  705 tok   44.4 tok/s | prompt   171.0 tok/s | wall   16.1s
+dual   mosv_1 natural #9 email       gen  118 tok   42.6 tok/s | prompt   191.0 tok/s | wall    3.0s
+VRAM ok: need ~6413 MiB per card, free {'Vulkan0': 13428, 'Vulkan1': 13428}
+dual   mosv_2 fixed   #0 teaching    gen  512 tok   48.5 tok/s | prompt   164.5 tok/s | wall   10.8s
+dual   mosv_2 fixed   #1 teaching    gen  512 tok   48.6 tok/s | prompt   215.4 tok/s | wall   10.7s
+dual   mosv_2 fixed   #2 debugging   gen  512 tok   51.2 tok/s | prompt   484.2 tok/s | wall   10.2s
+dual   mosv_2 fixed   #3 debugging   gen  512 tok   51.2 tok/s | prompt   454.4 tok/s | wall   10.2s
+dual   mosv_2 fixed   #4 story       gen  512 tok   51.1 tok/s | prompt   268.3 tok/s | wall   10.2s
+dual   mosv_2 fixed   #5 story       gen  512 tok   51.6 tok/s | prompt   293.8 tok/s | wall   10.1s
+dual   mosv_2 fixed   #6 everyday    gen  512 tok   51.2 tok/s | prompt   268.4 tok/s | wall   10.2s
+dual   mosv_2 fixed   #7 explanation gen  512 tok   48.0 tok/s | prompt   106.7 tok/s | wall   10.9s
+dual   mosv_2 fixed   #8 engineering gen  512 tok   49.9 tok/s | prompt   220.5 tok/s | wall   10.4s
+dual   mosv_2 fixed   #9 email       gen  512 tok   49.6 tok/s | prompt   166.6 tok/s | wall   10.6s
+VRAM ok: need ~6395 MiB per card, free {'Vulkan0': 13425, 'Vulkan1': 13425}
+dual   base_2 fixed   #0 teaching    gen  512 tok   51.5 tok/s | prompt   238.8 tok/s | wall   10.1s
+dual   base_2 fixed   #1 teaching    gen  512 tok   51.7 tok/s | prompt   200.0 tok/s | wall   10.1s
+dual   base_2 fixed   #2 debugging   gen  512 tok   51.5 tok/s | prompt   516.7 tok/s | wall   10.1s
+dual   base_2 fixed   #3 debugging   gen  512 tok   51.1 tok/s | prompt   434.6 tok/s | wall   10.2s
+dual   base_2 fixed   #4 story       gen  512 tok   49.8 tok/s | prompt   295.3 tok/s | wall   10.4s
+dual   base_2 fixed   #5 story       gen  512 tok   50.2 tok/s | prompt   169.5 tok/s | wall   10.5s
+dual   base_2 fixed   #6 everyday    gen  512 tok   50.3 tok/s | prompt   261.0 tok/s | wall   10.4s
+dual   base_2 fixed   #7 explanation gen  512 tok   50.3 tok/s | prompt   158.5 tok/s | wall   10.4s
+dual   base_2 fixed   #8 engineering gen  512 tok   50.9 tok/s | prompt   218.0 tok/s | wall   10.2s
+dual   base_2 fixed   #9 email       gen  512 tok   50.8 tok/s | prompt   258.3 tok/s | wall   10.3s
+VRAM ok: need ~6395 MiB per card, free {'Vulkan0': 13426, 'Vulkan1': 13426}
+VRAM ok: need ~6413 MiB per card, free {'Vulkan0': 13426, 'Vulkan1': 13426}
+VRAM ok: need ~9791 MiB per card, free {'Vulkan0': 13426, 'Vulkan1': 13426}
+single base_1 fixed   #0 teaching    gen  512 tok   53.0 tok/s | prompt   260.1 tok/s | wall    9.8s
+single base_1 fixed   #1 teaching    gen  512 tok   56.6 tok/s | prompt   172.2 tok/s | wall    9.3s
+single base_1 fixed   #2 debugging   gen  512 tok   57.8 tok/s | prompt   570.7 tok/s | wall    9.0s
+single base_1 fixed   #3 debugging   gen  512 tok   58.4 tok/s | prompt   514.0 tok/s | wall    8.9s
+single base_1 fixed   #4 story       gen  512 tok   56.8 tok/s | prompt   166.3 tok/s | wall    9.3s
+single base_1 fixed   #5 story       gen  512 tok   58.8 tok/s | prompt   307.1 tok/s | wall    8.9s
+single base_1 fixed   #6 everyday    gen  512 tok   58.0 tok/s | prompt   312.5 tok/s | wall    9.0s
+single base_1 fixed   #7 explanation gen  512 tok   56.5 tok/s | prompt   221.7 tok/s | wall    9.2s
+single base_1 fixed   #8 engineering gen  512 tok   57.7 tok/s | prompt   295.6 tok/s | wall    9.0s
+single base_1 fixed   #9 email       gen  512 tok   57.3 tok/s | prompt   308.5 tok/s | wall    9.1s
+single base_1 natural #0 teaching    gen 1011 tok   57.7 tok/s | prompt   266.6 tok/s | wall   17.7s
+single base_1 natural #1 teaching    gen  966 tok   57.4 tok/s | prompt   279.2 tok/s | wall   17.0s
+single base_1 natural #2 debugging   gen 1060 tok   57.2 tok/s | prompt   523.1 tok/s | wall   18.7s
+single base_1 natural #3 debugging   gen  852 tok   57.2 tok/s | prompt   488.1 tok/s | wall   15.1s
+single base_1 natural #4 story       gen  819 tok   57.4 tok/s | prompt   218.3 tok/s | wall   14.6s
+single base_1 natural #5 story       gen  963 tok   57.3 tok/s | prompt   330.4 tok/s | wall   17.0s
+single base_1 natural #6 everyday    gen  708 tok   58.0 tok/s | prompt   307.1 tok/s | wall   12.4s
+single base_1 natural #7 explanation gen  469 tok   56.7 tok/s | prompt   220.0 tok/s | wall    8.5s
+single base_1 natural #8 engineering gen  602 tok   56.2 tok/s | prompt   274.0 tok/s | wall   10.8s
+single base_1 natural #9 email       gen  380 tok   58.2 tok/s | prompt   278.8 tok/s | wall    6.7s
+VRAM ok: need ~9826 MiB per card, free {'Vulkan0': 13416, 'Vulkan1': 13416}
+single mosv_1 fixed   #0 teaching    gen  512 tok   57.3 tok/s | prompt   185.8 tok/s | wall    9.1s
+single mosv_1 fixed   #1 teaching    gen  512 tok   54.8 tok/s | prompt   232.6 tok/s | wall    9.5s
+single mosv_1 fixed   #2 debugging   gen  512 tok   56.9 tok/s | prompt   485.3 tok/s | wall    9.2s
+single mosv_1 fixed   #3 debugging   gen  512 tok   55.2 tok/s | prompt   416.7 tok/s | wall    9.5s
+single mosv_1 fixed   #4 story       gen  512 tok   57.0 tok/s | prompt   169.9 tok/s | wall    9.3s
+single mosv_1 fixed   #5 story       gen  512 tok   54.0 tok/s | prompt   289.6 tok/s | wall    9.7s
+single mosv_1 fixed   #6 everyday    gen  512 tok   53.4 tok/s | prompt   226.8 tok/s | wall    9.8s
+single mosv_1 fixed   #7 explanation gen  512 tok   57.6 tok/s | prompt   182.6 tok/s | wall    9.1s
+single mosv_1 fixed   #8 engineering gen  512 tok   55.5 tok/s | prompt   239.1 tok/s | wall    9.4s
+single mosv_1 fixed   #9 email       gen  512 tok   58.4 tok/s | prompt   242.5 tok/s | wall    9.0s
+single mosv_1 natural #0 teaching    gen  223 tok   58.9 tok/s | prompt   234.4 tok/s | wall    4.0s
+single mosv_1 natural #1 teaching    gen  513 tok   58.5 tok/s | prompt   202.5 tok/s | wall    8.9s
+single mosv_1 natural #2 debugging   gen  806 tok   55.6 tok/s | prompt   517.4 tok/s | wall   14.7s
+single mosv_1 natural #3 debugging   gen  707 tok   58.0 tok/s | prompt   437.0 tok/s | wall   12.4s
+single mosv_1 natural #4 story       gen  490 tok   57.9 tok/s | prompt   262.4 tok/s | wall    8.7s
+single mosv_1 natural #5 story       gen  663 tok   56.7 tok/s | prompt   272.2 tok/s | wall   11.8s
+single mosv_1 natural #6 everyday    gen  735 tok   55.8 tok/s | prompt   296.1 tok/s | wall   13.4s
+single mosv_1 natural #7 explanation gen  521 tok   58.8 tok/s | prompt   119.5 tok/s | wall    9.1s
+single mosv_1 natural #8 engineering gen  609 tok   57.9 tok/s | prompt   283.4 tok/s | wall   10.7s
+single mosv_1 natural #9 email       gen  122 tok   57.8 tok/s | prompt   296.8 tok/s | wall    2.3s
+VRAM ok: need ~9826 MiB per card, free {'Vulkan0': 13409, 'Vulkan1': 13409}
+single mosv_2 fixed   #0 teaching    gen  512 tok   60.0 tok/s | prompt   238.6 tok/s | wall    8.7s
+single mosv_2 fixed   #1 teaching    gen  512 tok   56.9 tok/s | prompt   277.5 tok/s | wall    9.1s
+single mosv_2 fixed   #2 debugging   gen  512 tok   56.5 tok/s | prompt   554.3 tok/s | wall    9.2s
+single mosv_2 fixed   #3 debugging   gen  512 tok   57.8 tok/s | prompt   506.6 tok/s | wall    9.0s
+single mosv_2 fixed   #4 story       gen  512 tok   55.3 tok/s | prompt   320.4 tok/s | wall    9.4s
+single mosv_2 fixed   #5 story       gen  512 tok   45.0 tok/s | prompt   233.3 tok/s | wall   11.6s
+single mosv_2 fixed   #6 everyday    gen  512 tok   52.6 tok/s | prompt   232.0 tok/s | wall   10.0s
+single mosv_2 fixed   #7 explanation gen  512 tok   48.6 tok/s | prompt   151.1 tok/s | wall   10.8s
+single mosv_2 fixed   #8 engineering gen  512 tok   50.1 tok/s | prompt   189.5 tok/s | wall   10.5s
+single mosv_2 fixed   #9 email       gen  512 tok   53.5 tok/s | prompt   178.2 tok/s | wall    9.9s
+VRAM ok: need ~9791 MiB per card, free {'Vulkan0': 13411, 'Vulkan1': 13411}
+single base_2 fixed   #0 teaching    gen  512 tok   53.0 tok/s | prompt   192.5 tok/s | wall    9.8s
+single base_2 fixed   #1 teaching    gen  512 tok   54.5 tok/s | prompt   220.3 tok/s | wall    9.6s
+single base_2 fixed   #2 debugging   gen  512 tok   54.1 tok/s | prompt   434.7 tok/s | wall    9.7s
+single base_2 fixed   #3 debugging   gen  512 tok   53.9 tok/s | prompt   368.1 tok/s | wall    9.7s
+single base_2 fixed   #4 story       gen  512 tok   53.3 tok/s | prompt   243.7 tok/s | wall    9.8s
+single base_2 fixed   #5 story       gen  512 tok   53.6 tok/s | prompt   239.8 tok/s | wall    9.8s
+single base_2 fixed   #6 everyday    gen  512 tok   53.4 tok/s | prompt   211.1 tok/s | wall    9.8s
+single base_2 fixed   #7 explanation gen  512 tok   53.2 tok/s | prompt   143.6 tok/s | wall    9.8s
+single base_2 fixed   #8 engineering gen  512 tok   53.5 tok/s | prompt   226.7 tok/s | wall    9.8s
+single base_2 fixed   #9 email       gen  512 tok   53.9 tok/s | prompt   230.1 tok/s | wall    9.7s
+VRAM ok: need ~9791 MiB per card, free {'Vulkan0': 13412, 'Vulkan1': 13412}
+VRAM ok: need ~9826 MiB per card, free {'Vulkan0': 13412, 'Vulkan1': 13412}
+saved C:\projects\llm_steering_rl\results\speed_v6_0_1

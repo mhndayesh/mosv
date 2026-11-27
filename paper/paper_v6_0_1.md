@@ -10,6 +10,9 @@ LM Studio. And why the RL method that worked on small models failed here.*
 >   GGUF in llama.cpp).** Share of behavior checks passed, base → trained:
 >   **teaching 0.58 → 0.97** (trained better on 98% of prompts), **debugging 0.17 → 0.44** (81%),
 >   **story 0.73 → 0.81** (62%).
+> - **Shorter answers, same speed.** On the locked test, answers are 25% shorter overall (748 → 561 tokens;
+>   teaching 986 → 325). In a controlled speed test in llama.cpp, MoSV generates tokens as fast as base Gemma
+>   (llama-bench: 60.0 vs 58.1 tok/s on one card), so a full answer arrives about 31% sooner (13.8 → 9.6 s).
 > - **The method that worked is plain supervised training,** not RL: the model writes answers while told the rules,
 >   a judge checks them, only verified better answers are kept, and the experts learn them from the plain prompt.
 > - **The method that failed:** the RL recipe that improved Qwen3-4B and Bonsai-4B gave no gain on Gemma. The test
@@ -176,13 +179,56 @@ what ships. A chat demo through `llama-server --jinja` with hand-written prompts
 teaching 1,011 → 223 tokens and addressed to the child; the everyday and coding answers keep the same content
 and structure as plain Gemma.
 
-### 4.4 What this means
+### 4.4 Speed and answer length
+
+**Answer length is a key improvement.** The trained behaviors cut the padding: teaching stops writing a lesson
+plan for a teacher, debugging stops listing every possible cause, and stories drop the scene-setting. On the
+locked test (prompts never used in training), answers are **25% shorter overall**, while untrained topics keep
+their length (within 3%):
+
+![Answer length on the locked test](figures_v6_0_1/5_answer_length_locked_test.png)
+
+**The experts cost no speed.** A controlled test (`reports/speed_v6_0_1.py`): the same llama.cpp build and flags,
+one model loaded at a time, the same 10 hand-written prompts, Gemma's recommended sampling with every sampler set
+explicitly, a fixed seed, thinking off and no prompt cache. Speed is measured three ways: llama-bench (5 repeats),
+the server at a fixed 512 tokens per answer (2 sessions per model in the order base, MoSV, MoSV, base, so drift hits
+both equally), and natural answers where each model stops on its own. This was done on two cards (layer split) and
+on one card.
+
+![Speed summary](figures_v6_0_1/4_speed_summary.png)
+
+| One card (RX 9070 XT) | Base | MoSV | Change |
+|---|---|---|---|
+| Generation, llama-bench tg128 | 58.1 tok/s | 60.0 tok/s | +3% (within noise) |
+| Prompt reading, llama-bench pp512 | 1,973 tok/s | 1,976 tok/s | 0% |
+| Answer length (10 prompts) | 783 tokens | 539 tokens | **-31%** |
+| Time per answer | 13.8 s | 9.6 s | **-31%** |
+
+- The three small experts and routers (36 MB) add no measurable cost: token speed is the same within noise on one
+  card and on two (dual: 53.4 vs 53.1 tok/s generation, -2% prompt reading).
+- Because answers are shorter, a full answer arrives about 31% sooner on one card and 23% sooner on two.
+- No answer was cut off: all 40 natural answers ended on their own (longest 1,060 tokens, limit 2,048).
+- One card is faster than two for this 7 GB model (58 vs 53 tok/s): it fits on one card, and splitting adds
+  card-to-card traffic.
+- Server speed at fixed length varies ±10% between sessions of the same model on the same prompt (measured), so
+  llama-bench is the cleaner speed figure.
+
+Per prompt (natural answers):
+
+![Answer length and time per prompt](figures_v6_0_1/6_speed_per_prompt.png)
+
+All requests, answers and raw llama.cpp logs: `results/speed_v6_0_1/` (`README.md`, `speed.json`, `outputs.md`,
+`*_server.log`, `*_bench.log`).
+
+### 4.5 What this means
 
 - **Teaching reached its ceiling.** The model now teaches a child directly in about a third of the words, as it
   does when told, without being told.
 - **Debugging more than doubled** and the answers got shorter, but it stays below its ceiling (0.44 against 0.58).
   The hardest behavior, separating facts from guesses, moved least.
 - **Story moved most of the way** to its ceiling (0.81 against 0.83).
+- **Shorter and no slower:** trained topics answer in 17-67% fewer tokens at the same token speed, so answers
+  arrive sooner.
 - **Untrained topics:** explanation and email are unchanged. **Engineering lost ground** (0.77 → 0.71, trained
   better on only 39%); on dev it had gained (0.75 → 0.79). Its prompts are close to debugging's, and the router at
   layer 12 keeps only 71% of "none" tokens as "none". A router fitted with engineering as its own "none" group is
@@ -199,7 +245,9 @@ and structure as plain Gemma.
 - **Small per-topic samples:** 43 prompts per topic on the locked test, 60 on dev.
 - **Debugging prompts have no code.** They are bug reports, so the target behavior is honest analysis, not a
   verified fix.
-- **Engineering leak** (section 4.4).
+- **Engineering leak** (section 4.5).
+- **Speed test:** one machine (2x RX 9070 XT, Vulkan), 10 prompts. Shorter is better here because the trained
+  behaviors ask for it (teach the child, not a lesson plan); it is not a general claim that shorter is better.
 
 ## 6. What v6.0.1 changes, in one table
 
@@ -210,6 +258,7 @@ and structure as plain Gemma.
 | Before training | Nothing | Nothing | **Gate: plain vs told vs a strong model** |
 | Judge repeats itself | 33% same winner | 25.5% (chance) | **95-98% same yes/no** |
 | Result | 66% of prompts better | No gain | **Teaching 98%, debugging 81%, story 62% better** |
+| Answer length / speed | 4x shorter | - | **25% shorter, same token speed, answers ~31% sooner** |
 
 ## 7. Reproduce
 
@@ -222,6 +271,8 @@ python -m v6_0_1.build_data --per-topic 300 --copies 2 --topics debugging teachi
 python -m v6_0_1.train --run gemma_v601
 python -m v6_0_1.evaluate --run gemma_v601 --checkpoint steer_0100.pt --split dev --fresh
 python -m v6_0_1.evaluate --run gemma_v601 --checkpoint steer_0100.pt --split test
+python reports/speed_v6_0_1.py          # speed test (both cards free, nothing else loaded)
+python reports/speed_chart_v6_0_1.py    # table images
 ```
 
 Run it: `llama-server -m MoSV-Gemma-4-12B-v6.0.1-Q4_K_M.gguf -ngl 99 -fa on --jinja`, with the model's recommended
